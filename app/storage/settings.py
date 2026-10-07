@@ -10,7 +10,7 @@ from dataclasses import dataclass, asdict, fields
 class AppSettings:
     """Application settings."""
     api_key: str = ""
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-3.5-flash-lite"
     input_folder: str = ""
     output_folder: str = ""
     rewrite_intensity: str = "balanced"  # light, balanced, deep
@@ -32,14 +32,14 @@ class AppSettings:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'AppSettings':
-        """Create from dictionary, ignoring unknown keys and migrating legacy model names."""
+        """Create from dictionary, ignoring unknown keys and migrating retired model names."""
         valid_keys = {f.name for f in fields(cls)}
         filtered = {k: v for k, v in data.items() if k in valid_keys}
 
-        # Migrate non-existent legacy model names to gemini-2.5-flash
-        model = filtered.get("model_name", "gemini-2.5-flash")
-        if model in ("gemini-3.8-flash", "gemini-3.7-flash", "gemini-1.5-pro", "gemini-1.5-flash"):
-            filtered["model_name"] = "gemini-2.5-flash"
+        # Migrate retired 2.x / 1.5 model names to active fast model
+        model = filtered.get("model_name", "gemini-3.5-flash-lite")
+        if model in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-pro", "gemini-1.5-flash"):
+            filtered["model_name"] = "gemini-3.5-flash-lite"
 
         return cls(**filtered)
 

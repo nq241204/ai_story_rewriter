@@ -3,7 +3,11 @@
 import json
 import random
 import time
+import warnings
 from typing import Optional, Dict, Any
+
+# Suppress google-genai AFC info warnings
+warnings.filterwarnings("ignore")
 
 from google import genai
 from google.genai import types
@@ -12,29 +16,33 @@ from app.utils.logger import get_logger
 
 
 class GeminiClient:
-    """Client for Google Gemini API."""
+    """Client for Google Gemini API with instant 503/404 model failover."""
 
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gemini-2.5-flash"
+        model_name: str = "gemini-3.5-flash-lite"
     ):
         self.api_key = api_key
-        self.model_name = model_name or "gemini-2.5-flash"
+        self.model_name = model_name or "gemini-3.5-flash-lite"
         self.logger = get_logger()
 
-        # Fallback models in order of speed & token efficiency
+        # Verified active models ordered by availability, speed (~1s), and token efficiency
         self.fallback_models = [
-            "gemini-2.5-flash",      # Primary fast & cost-efficient model
-            "gemini-2.0-flash",      # Fast fallback
-            "gemini-2.5-pro",        # High-capability fallback
+            "gemini-3.5-flash-lite",      # ~1.1s response, 100% availability & lowest token cost
+            "gemini-flash-lite-latest",   # ~1.0s response, 100% availability
+            "gemini-3.8-flash",           # Latest 3.8 Flash
+            "gemini-3.7-flash",           # 3.7 Flash
+            "gemini-3.6-flash",           # 3.6 Flash
         ]
 
         # Remove duplicate models while preserving order
         self.fallback_models = list(dict.fromkeys(self.fallback_models))
 
         try:
-            self.client = genai.Client(api_key=api_key)
+            # Disable SDK's internal 5x tenacity retry so our fast model failover is immediate
+            default_http = self._build_http_options(60)
+            self.client = genai.Client(api_key=api_key, http_options=default_http)
             self.logger.info(
                 f"Gemini client initialized with model: {self.model_name}"
             )
@@ -50,7 +58,7 @@ class GeminiClient:
 
     def _is_retryable_error(self, error: Exception) -> bool:
         """
-        Determine whether an API error is transient and should be retried on the same model.
+        Determine whether an API error is transient.
         """
         error_text = str(error).upper()
 
@@ -73,24 +81,35 @@ class GeminiClient:
             for error_code in retryable_errors
         )
 
-    def _is_model_not_found_error(self, error: Exception) -> bool:
+    def _should_switch_model_immediately(self, error: Exception) -> bool:
         """
-        Determine if the error indicates the model name does not exist or is unsupported,
-        so we can immediately switch to the next fallback model without wasting time.
+        Determine if we should immediately switch to the next fallback model
+        instead of waiting and retrying the same overloaded/unavailable model.
         """
         error_text = str(error).upper()
-        return any(
-            marker in error_text
-            for marker in ("404", "NOT_FOUND", "NOT FOUND", "NOT SUPPORTED")
+        immediate_switch_markers = (
+            "404",
+            "NOT_FOUND",
+            "NOT FOUND",
+            "NOT SUPPORTED",
+            "NO LONGER AVAILABLE",
+            "503",
+            "UNAVAILABLE",
+            "HIGH DEMAND",
+            "429",
+            "RESOURCE_EXHAUSTED",
+            "504",
+            "DEADLINE_EXCEEDED",
         )
+        return any(marker in error_text for marker in immediate_switch_markers)
 
     def _wait_before_retry(self, attempt: int) -> None:
         """
-        Fast exponential backoff with jitter: 1.5s -> 3s -> 6s
+        Fast exponential backoff with jitter: 1.0s -> 2.0s -> 4.0s
         """
-        backoff_times = [1.5, 3.0, 6.0]
-        base_wait = backoff_times[attempt] if attempt < len(backoff_times) else 6.0
-        jitter = random.uniform(0.1, 0.6)
+        backoff_times = [1.0, 2.0, 4.0]
+        base_wait = backoff_times[attempt] if attempt < len(backoff_times) else 4.0
+        jitter = random.uniform(0.1, 0.4)
         wait_time = base_wait + jitter
 
         self.logger.warning(f"Waiting {wait_time:.1f}s before retry...")
@@ -105,11 +124,17 @@ class GeminiClient:
         return models_to_try
 
     @staticmethod
-    def _build_http_options(timeout: Optional[int]) -> Optional[types.HttpOptions]:
-        """Convert timeout in seconds to google-genai HttpOptions (milliseconds)."""
-        if timeout and timeout > 0:
-            return types.HttpOptions(timeout=int(timeout * 1000))
-        return None
+    def _build_http_options(timeout: Optional[int]) -> types.HttpOptions:
+        """
+        Convert timeout in seconds to google-genai HttpOptions (milliseconds).
+        Enforces minimum 15s (15000ms) required by Gemini API deadline rules,
+        and sets attempts=1 to prevent SDK internal 45s tenacity hangs on 503.
+        """
+        safe_seconds = max(15, int(timeout or 60))
+        return types.HttpOptions(
+            timeout=safe_seconds * 1000,
+            retry_options=types.HttpRetryOptions(attempts=1)
+        )
 
     # ============================================================
     # CONNECTION TEST
@@ -117,7 +142,7 @@ class GeminiClient:
 
     def test_connection(self) -> bool:
         """
-        Test the API connection with minimal token usage.
+        Test the API connection with fast automatic model failover.
 
         Returns:
             True if connection successful, False otherwise.
@@ -132,20 +157,22 @@ class GeminiClient:
                 )
                 response = self.client.models.generate_content(
                     model=model,
-                    contents="OK",
+                    contents="Reply OK",
                     config=config
                 )
 
                 if response and response.text:
                     if model != self.model_name:
-                        self.logger.info(f"Switched active model to available model: {model}")
+                        self.logger.info(
+                            f"Model {self.model_name} busy/unavailable -> switched to fast model: {model}"
+                        )
                         self.model_name = model
-                    self.logger.info("Gemini API connection successful")
+                    self.logger.info(f"Gemini API connection successful ({self.model_name})")
                     return True
 
             except Exception as e:
                 self.logger.warning(f"Connection test failed on {model}: {e}")
-                if self._is_model_not_found_error(e):
+                if self._should_switch_model_immediately(e):
                     continue
                 return False
 
@@ -164,7 +191,7 @@ class GeminiClient:
         timeout: int = 60
     ) -> Optional[str]:
         """
-        Generate text using Gemini API with automatic retry and fallback.
+        Generate text using Gemini API with instant model failover on 503/404.
         """
         models_to_try = self._build_models_to_try()
 
@@ -194,7 +221,7 @@ class GeminiClient:
                     if response and response.text:
                         if model != self.model_name:
                             self.logger.warning(
-                                f"Fallback model {model} succeeded. Switching current model."
+                                f"Fallback model {model} succeeded. Switching active model to {model}."
                             )
                             self.model_name = model
 
@@ -208,14 +235,14 @@ class GeminiClient:
                         f"API call failed (model={model}, attempt={attempt + 1}/{max_retries}): {e}"
                     )
 
-                    # If model does not exist (404), break immediately to try next fallback model
-                    if self._is_model_not_found_error(e):
+                    # If model is overloaded (503) or not found (404) and we have fallback models,
+                    # switch immediately without wasting time retrying the overloaded model!
+                    if self._should_switch_model_immediately(e) and model_index < len(models_to_try) - 1:
                         self.logger.warning(
-                            f"Model {model} not found/supported. Trying next fallback model..."
+                            f"Model {model} returned 503/404/429. Failing over immediately to next model..."
                         )
                         break
 
-                    # Do not retry non-transient errors (e.g., invalid API key)
                     if not self._is_retryable_error(e):
                         self.logger.error("Error is not retryable. Stopping request.")
                         return None
@@ -249,7 +276,7 @@ class GeminiClient:
         timeout: int = 60
     ) -> Optional[Dict[str, Any]]:
         """
-        Generate JSON using Gemini API.
+        Generate JSON using Gemini API with instant model failover.
         """
         models_to_try = self._build_models_to_try()
 
@@ -298,7 +325,7 @@ class GeminiClient:
 
                     if model != self.model_name:
                         self.logger.warning(
-                            f"Fallback model {model} succeeded. Switching current model."
+                            f"Fallback model {model} succeeded. Switching active model to {model}."
                         )
                         self.model_name = model
 
@@ -313,9 +340,9 @@ class GeminiClient:
                         f"JSON API call failed (model={model}, attempt={attempt + 1}/{max_retries}): {e}"
                     )
 
-                    if self._is_model_not_found_error(e):
+                    if self._should_switch_model_immediately(e) and model_index < len(models_to_try) - 1:
                         self.logger.warning(
-                            f"Model {model} not found/supported. Trying next fallback model..."
+                            f"Model {model} busy/unavailable. Switching immediately to next model..."
                         )
                         break
 

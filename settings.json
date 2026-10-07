@@ -1,6 +1,6 @@
 {
   "api_key": "",
-  "model_name": "gemini-2.5-flash",
+  "model_name": "gemini-3.5-flash-lite",
   "input_folder": "",
   "output_folder": "",
   "rewrite_intensity": "balanced",
