@@ -1,6 +1,0 @@
-10:08:23 - INFO - Starting AI Story Rewriter
-10:08:24 - INFO - Application started
-10:11:59 - INFO - Gemini client initialized with model: gemini-1.5-pro
-10:11:59 - ERROR - Connection test failed: 404 models/gemini-1.5-pro is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.
-10:12:26 - INFO - Gemini client initialized with model: gemini-1.5-pro
-10:12:27 - ERROR - Connection test failed: 404 models/gemini-1.5-pro is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.

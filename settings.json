@@ -1,6 +1,6 @@
 {
   "api_key": "",
-  "model_name": "gemini-3.8-flash",
+  "model_name": "gemini-2.5-flash",
   "input_folder": "",
   "output_folder": "",
   "rewrite_intensity": "balanced",
@@ -8,5 +8,11 @@
   "save_failed": true,
   "max_chars_per_line": 42,
   "max_lines_per_subtitle": 2,
-  "theme": "dark"
+  "theme": "dark",
+  "api_timeout": 60,
+  "analysis_timeout": 30,
+  "qc_timeout": 30,
+  "export_srt": false,
+  "skip_processed": true,
+  "use_ai_qc": false
 }

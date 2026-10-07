@@ -391,6 +391,24 @@ def test_no_save_failed_files():
     print("[OK] No save failed files test passed")
 
 
+import unittest
+
+
+class TestStateTransitions(unittest.TestCase):
+    """Unittest wrapper so `python -m unittest discover tests` runs all state transition tests."""
+
+    def test_all_state_transitions(self):
+        test_state_flow_success()
+        test_state_flow_with_qc_failure()
+        test_state_flow_with_rewrite_failure()
+        test_state_flow_with_title_failure()
+        test_context_isolation()
+        test_malformed_srt_handling()
+        test_empty_srt_handling()
+        test_save_failed_files()
+        test_no_save_failed_files()
+
+
 if __name__ == "__main__":
     test_state_flow_success()
     test_state_flow_with_qc_failure()
@@ -401,5 +419,5 @@ if __name__ == "__main__":
     test_empty_srt_handling()
     test_save_failed_files()
     test_no_save_failed_files()
-    
+
     print("\n[SUCCESS] All state transition tests passed!")

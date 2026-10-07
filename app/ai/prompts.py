@@ -1,140 +1,76 @@
-"""AI prompts for AI Story Rewriter."""
+"""AI prompts for AI Story Rewriter (Token-Optimized & Single-Pass TTS Output)."""
+
 
 class Prompts:
-    """Collection of prompts for Gemini API interactions."""
-    
-    # System instruction for story rewriting
+    """Collection of compact, token-efficient prompts for Gemini API interactions."""
+
+    # System instruction for unified story rewriting + CTR title + TTS script output
     REWRITE_SYSTEM = """You are an expert English-language dramatic storyteller and narrative editor.
-
-The source material is already written in English.
-
-Your task is to rewrite it, not translate it.
-
+The source material is already in English. Rewrite it—do not translate or summarize.
 Preserve the core story, major events, relationships, central conflict, major reveal, climax, and ending.
+Improve storytelling so it feels natural, emotionally compelling, logically consistent, suspenseful, and human-written.
+Strengthen character motivation, cause-and-effect, realistic dialogue, and pacing.
+Do not reveal major twists earlier than appropriate. Avoid repetitive AI clichés and meta-commentary.
 
-Improve the storytelling so it feels natural, emotionally compelling, logically consistent, suspenseful, and written by a skilled human.
+Xuất kết quả thành 2 phần rõ ràng:
+---TITLE--- : Title giật tít CTR YouTube (1 dòng tiếng Anh tự nhiên, tạo tò mò mạnh, kịch tính, không spoil kết, không emoji/hashtag/ngoặc kép).
+---TTS_SCRIPT--- : Toàn bộ lời thoại tiếng Anh liền mạch, bỏ hoàn toàn số thứ tự và timecode, chia đoạn văn ngắn (2-3 câu/đoạn) tối ưu cho công cụ Text-to-Speech đọc diễn cảm."""
 
-Strengthen character motivation and cause-and-effect relationships.
+    # Unified single-pass rewrite + title prompt (saves 50%+ output tokens & avoids extra API calls)
+    REWRITE_STORY = """Rewrite the following story to make it engaging, natural, emotional, logical, and human-sounding while preserving the core plot and major events.
 
-Improve dialogue so characters sound like real people.
+Format output strictly in 2 parts:
+---TITLE---
+<1 compelling English YouTube-style CTR title>
 
-Improve pacing and scene transitions.
-
-Build curiosity naturally and maintain listener engagement.
-
-Do not summarize the story.
-
-Do not produce commentary about your changes.
-
-Do not explain your writing process.
-
-Do not create a completely different story.
-
-Do not reveal major twists earlier than appropriate.
-
-Do not use repetitive AI-style phrases.
-
-Return only the rewritten story."""
-    
-    # Rewrite prompt
-    REWRITE_STORY = """Rewrite the following story to make it more engaging, natural, emotional, logical, and human-sounding while preserving the core plot and major events.
+---TTS_SCRIPT---
+<Full rewritten English story in continuous prose, completely removing all subtitle numbers and timecodes, split into short paragraphs of 2-3 sentences per paragraph optimized for Text-to-Speech>
 
 STORY:
-{story}
+{story}"""
 
-Rewritten story:"""
-    
-    # Analysis prompt
-    ANALYZE_STORY = """Analyze the following story and provide a structured analysis covering:
-- Main characters
-- Secondary characters
-- Character relationships
-- Setting
-- Timeline
-- Main conflict
-- Character motivations
-- Important events
-- Cause-and-effect relationships
-- Emotional stakes
-- Suspense points
-- Major reveal
-- Climax
-- Resolution
-- Continuity constraints
+    # Intensity hints (compact to save input tokens)
+    INTENSITY_HINTS = {
+        "light": "Polish grammar, flow, and emotional delivery lightly while keeping close to original phrasing.",
+        "balanced": "Enhance dramatic tension, dialogue naturalness, and emotional pacing while keeping all plot points intact.",
+        "deep": "Deeply elevate narrative hooks, sensory details, emotional stakes, and dramatic dialogue while preserving the exact core plot."
+    }
+
+    # Optional standalone analysis prompt (only used if AI analysis is explicitly forced)
+    ANALYZE_STORY = """Briefly list main characters, relationships, core conflict, climax, and resolution for continuity:
 
 STORY:
-{story}
+{story}"""
 
-Analysis:"""
-    
-    # Quality control prompt
-    QC_CHECK = """You are a quality control editor. Review the rewritten story against the original story and analysis.
+    # Optional AI quality control prompt (only used if AI QC is explicitly forced)
+    QC_CHECK = """Review the rewritten story against the original. Check plot preservation, character/pronoun consistency, and natural English.
 
-Check for:
-1. Core plot preserved
-2. Major events preserved
-3. Character identities consistent
-4. Relationships consistent
-5. Pronouns consistent
-6. Timeline consistent
-7. Locations consistent
-8. Cause and effect logical
-9. Motivations believable
-10. Climax preserved
-11. Ending preserved
-12. No accidental contradictions
-13. No major unexplained events
-14. No excessive repetition
-15. Natural English
-16. Strong pacing
-17. Good emotional progression
-
-ORIGINAL STORY:
+ORIGINAL:
 {original_story}
 
-REWRITTEN STORY:
+REWRITTEN:
 {rewritten_story}
 
-Return a JSON response with this exact format:
+Return JSON:
 {{
   "status": "PASS" or "FAIL",
-  "issues": ["list of specific issues if status is FAIL, empty list if PASS"]
+  "issues": ["specific issues if FAIL, else empty"]
 }}"""
-    
-    # QC correction prompt
-    QC_CORRECTION = """The following rewritten story failed quality control with these issues:
 
+    # QC correction prompt (used only when local or AI QC detects critical issues)
+    QC_CORRECTION = """Fix these issues in the rewritten story while preserving core plot:
 ISSUES:
 {issues}
 
-REWRITTEN STORY:
+STORY:
 {rewritten_story}
 
-Fix the issues while preserving the story's core elements. Return only the corrected story."""
-    
-    # Title generation prompt
-    GENERATE_TITLE = """Generate exactly ONE compelling YouTube-style title for the following story.
+Output strictly with ---TITLE--- and ---TTS_SCRIPT--- (2-3 sentences per paragraph, no timecodes)."""
 
-The title must be:
-- Hook-first
-- Use the strongest curiosity trigger from the story
-- Include shocking/emotional event
-- Include character or high-stakes situation
-- Create a curiosity gap
-- Natural English
-- Strong curiosity
-- Emotional tension
-- Accurate to the story
-- No dishonest clickbait
-- Do not reveal the ending
-- Do not reveal the entire twist
-- No generic titles
-- No excessive capitalization
-- No emojis
-- No hashtags
-- No quotation marks unless genuinely necessary
+    # Standalone fallback title generation prompt (only used if single-pass response missed title)
+    GENERATE_TITLE = """Generate ONE compelling English YouTube CTR title (hook-first, curiosity gap, emotional tension, no spoilers, no emojis/hashtags/quotes):
 
 STORY:
 {story}
 
-Return ONLY the title, nothing else."""
+Return ONLY the title."""

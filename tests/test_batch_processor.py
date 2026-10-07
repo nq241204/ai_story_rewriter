@@ -331,6 +331,24 @@ def test_can_resume():
     print("[OK] Can resume test passed")
 
 
+import unittest
+
+
+class TestBatchProcessor(unittest.TestCase):
+    """Unittest wrapper so `python -m unittest discover tests` runs all batch tests."""
+
+    def test_all_batch_processor_flows(self):
+        test_batch_processor_initialization()
+        test_scan_directory()
+        test_natural_sorting()
+        test_file_status_tracking()
+        test_progress_tracking()
+        test_pause_resume()
+        test_stop()
+        test_reset()
+        test_can_resume()
+
+
 if __name__ == "__main__":
     test_batch_processor_initialization()
     test_scan_directory()
@@ -341,5 +359,5 @@ if __name__ == "__main__":
     test_stop()
     test_reset()
     test_can_resume()
-    
+
     print("\n[SUCCESS] All batch processor tests passed!")

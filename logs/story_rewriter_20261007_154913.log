@@ -1,7 +1,0 @@
-15:49:13 - INFO - Starting AI Story Rewriter
-15:49:14 - INFO - Gemini client initialized with model: gemini-3.8-flash
-15:49:14 - INFO - Application started
-15:49:33 - INFO - Scanning directory: C:/Users/PC/Documents/test1/New/SUB
-15:49:33 - INFO - Found 33 SRT files
-15:49:49 - INFO - Gemini client initialized with model: gemini-3.8-flash
-15:49:49 - INFO - Testing Gemini connection with model: gemini-3.8-flash
