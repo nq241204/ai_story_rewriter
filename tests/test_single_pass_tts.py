@@ -151,6 +151,32 @@ class TestSinglePassTTS(unittest.TestCase):
         self.assertTrue(len(title_py) > 0)
         self.assertTrue(len(script_py) > 0)
 
+    def test_cross_story_uniqueness_guard_and_state_isolation(self):
+        """Verify StoryUniquenessGuard recasts duplicate source stories/names and isolates state across stories."""
+        dummy_client = DummyGeminiClient()
+        ai_service = AIService(dummy_client, use_ai_analysis=False, use_ai_qc=False, workflow_mode="full_ai")
+
+        story_1 = "Marcus entered the luxury dealership in stained overalls. Kevin mocked Marcus in front of everyone."
+        story_2_dup = "Marcus entered the luxury dealership in stained overalls. Kevin mocked Marcus in front of everyone."
+        story_3_distinct = "Elena opened the small bakery before dawn. David brought the fresh flour sacks inside."
+
+        # Story 1
+        ai_service.rewrite_story(story_1)
+        prompt_1 = dummy_client.last_prompt
+        self.assertIn("Marcus", prompt_1)
+
+        # Story 2 (accidental duplicate source SRT in batch): must automatically recast character names & add CRITICAL UNIQUENESS MANDATE
+        ai_service.rewrite_story(story_2_dup)
+        prompt_2 = dummy_client.last_prompt
+        self.assertIn("CRITICAL UNIQUENESS MANDATE", prompt_2)
+        self.assertNotIn("Main characters (use these exact names consistently): Marcus", prompt_2)
+
+        # Story 3 (completely different story called without manual reset_state): must NOT leak Story 1 or 2's text
+        ai_service.rewrite_story(story_3_distinct)
+        prompt_3 = dummy_client.last_prompt
+        self.assertIn("Elena", prompt_3)
+        self.assertNotIn("stained overalls", prompt_3)
+
     def test_single_api_call_per_story(self):
         """Verify that processing an entire story makes AT MOST 1 Gemini API call (or 0 if clean in Hybrid mode)."""
         dummy_client = DummyGeminiClient()

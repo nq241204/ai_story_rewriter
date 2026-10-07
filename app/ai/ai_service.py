@@ -4,7 +4,7 @@ import re
 from typing import Optional, Dict, Any, List
 from app.ai.gemini_client import GeminiClient
 from app.ai.prompts import Prompts
-from app.pipeline.pre_checker import PythonPreChecker, PreCheckReport
+from app.pipeline.pre_checker import PythonPreChecker, PreCheckReport, StoryUniquenessGuard
 from app.utils.logger import get_logger
 from app.utils.text_utils import (
     strip_srt_artifacts,
@@ -15,7 +15,7 @@ from app.utils.text_utils import (
 
 
 class AIService:
-    """Service for AI-powered story processing with Hybrid Python+LLM workflow."""
+    """Service for AI-powered story processing with Hybrid Python+LLM workflow and Cross-Story Uniqueness Guard."""
 
     def __init__(
         self,
@@ -42,6 +42,7 @@ class AIService:
         self.client = client
         self.prompts = Prompts()
         self.pre_checker = PythonPreChecker()
+        self.uniqueness_guard = StoryUniquenessGuard()
         self.logger = get_logger()
         self.api_timeout = api_timeout
         self.analysis_timeout = analysis_timeout
@@ -52,18 +53,26 @@ class AIService:
         self.use_ai_qc = use_ai_qc
         self.workflow_mode = (workflow_mode or "full_ai").lower()
 
-        # Cached outputs for the current file
+        # Cached outputs for the current file (isolated per call)
+        self._last_source_hash: Optional[int] = None
+        self._pending_source_report: Optional[PreCheckReport] = None
         self.last_title: Optional[str] = None
         self.last_tts_script: Optional[str] = None
         self.last_formatted_output: Optional[str] = None
         self.last_precheck_report: Optional[PreCheckReport] = None
 
     def reset_state(self) -> None:
-        """Reset cached single-pass outputs between files."""
+        """Reset cached single-pass outputs between files (preserves cross-story uniqueness history)."""
+        self._last_source_hash = None
+        self._pending_source_report = None
         self.last_title = None
         self.last_tts_script = None
         self.last_formatted_output = None
         self.last_precheck_report = None
+
+    def reset_uniqueness_history(self) -> None:
+        """Reset cross-story uniqueness registry if starting a completely new project."""
+        self.uniqueness_guard.reset()
 
     # ============================================================
     # STEP 1: PURE PYTHON PRE-CHECK (0 TOKENS)
@@ -74,7 +83,9 @@ class AIService:
         Run the pure-Python Pre-Checker (0 tokens, processes millions of words in seconds).
         Detects repetitive words, proper noun typos, long sentences, and formatting issues.
         """
+        self._last_source_hash = hash(story)
         report = self.pre_checker.analyze_and_prepare(story)
+        self._pending_source_report = report
         self.last_precheck_report = report
         self.logger.info(
             f"Python Pre-Check: {len(report.paragraphs)} paragraphs "
@@ -263,23 +274,40 @@ class AIService:
 
     def rewrite_story(self, original_story: str) -> Optional[str]:
         """
-        Rewrite story according to configured `workflow_mode`:
+        Rewrite story according to configured `workflow_mode`, with strict context isolation
+        and cross-story uniqueness enforcement so no two stories ever duplicate content:
           - "python_only": 0 tokens! Returns Python-cleaned TTS paragraphs immediately.
           - "hybrid": Only sends flagged paragraphs to LLM if partial flags exist,
                       or full single-pass with Python pre-check guidance.
-          - "full_ai": Full single-pass rewrite + title generation.
+          - "full_ai": Full single-pass plot-skeleton rewrite + title generation + uniqueness guard.
         """
-        report = self.last_precheck_report or self.run_precheck(original_story)
+        # Guarantee zero state carryover: consume pending source report once, or run fresh precheck
+        if self._pending_source_report is not None and self._last_source_hash == hash(original_story):
+            report = self._pending_source_report
+            self._pending_source_report = None
+        else:
+            self.reset_state()
+            report = self.run_precheck(original_story)
+            self._pending_source_report = None
 
         # Mode 1: Pure Python Pre-Check Only (0 AI Tokens — for human review/editing)
         if self.workflow_mode == "python_only":
             self.logger.info("Python-Only Mode: 0 AI tokens used. Returning pre-checked TTS script.")
             clean_script = "\n\n".join(report.paragraphs)
-            auto_title = (
-                f"Story ({', '.join(report.detected_characters[:2])})"
-                if report.detected_characters
-                else "Story_PreChecked"
+            clean_script = self.pre_checker.normalize_proper_nouns_in_text(clean_script, report)
+            clean_script, active_chars, _, _ = self.uniqueness_guard.prepare_unique_source_and_directive(
+                clean_script, report.detected_characters
             )
+            auto_title = (
+                f"Story ({', '.join(active_chars[:2])})"
+                if active_chars
+                else f"Story_{self.uniqueness_guard.story_counter}"
+            )
+            _, uniq_pct, uniq_note = self.uniqueness_guard.verify_and_register(
+                auto_title, clean_script, original_story, active_chars
+            )
+            report.uniqueness_score_pct = uniq_pct
+            report.uniqueness_note = uniq_note
             self.last_title = auto_title
             self.last_tts_script = clean_script
             self.last_formatted_output = (
@@ -301,7 +329,7 @@ class AIService:
         ):
             return self.rewrite_flagged_paragraphs_only(report)
 
-        # Mode 3: Full Single-Pass Story Rewrite from Plot Skeleton (guided by Python Pre-Check)
+        # Mode 3: Full Single-Pass Story Rewrite from Plot Skeleton (guided by Python Pre-Check & Uniqueness Guard)
         self.logger.info("Starting single-pass story rewrite + CTR title generation (guided by Python Pre-Check)")
         clean_input = "\n\n".join(report.paragraphs)
         if not clean_input:
@@ -310,11 +338,21 @@ class AIService:
         # Fix any character name typos in the source skeleton in pure Python (0 tokens)
         clean_input = self.pre_checker.normalize_proper_nouns_in_text(clean_input, report)
 
+        # Apply Cross-Story Uniqueness Guard (0 tokens): recast names if source SRT is duplicate & rotate hook style
+        clean_input, active_chars, uniqueness_directive, was_source_dup = (
+            self.uniqueness_guard.prepare_unique_source_and_directive(clean_input, report.detected_characters)
+        )
+        if was_source_dup:
+            self.logger.warning(
+                "Source overlap detected with an earlier story! Recasting character names and narrative perspective."
+            )
+
         notes = [
-            f"Target story length: maintain or enrich depth (~{max(report.total_words, 120)} words, never summarize)."
+            f"Target story length: maintain or enrich depth (~{max(report.total_words, 120)} words, never summarize).",
+            uniqueness_directive,
         ]
-        if report.detected_characters:
-            notes.append(f"Main characters (keep names 100% consistent): {', '.join(report.detected_characters)}.")
+        if active_chars:
+            notes.append(f"Main characters (use these exact names consistently): {', '.join(active_chars)}.")
         if report.flagged_indices:
             flagged_summary = "; ".join(
                 f"P#{i+1} ({', '.join(report.paragraph_issues[i].flags)})"
@@ -333,10 +371,11 @@ class AIService:
             precheck_notes=precheck_notes,
         )
 
+        temp = 0.85 if was_source_dup else 0.75
         raw_output = self.client.generate_content(
             prompt,
             system_instruction=system_instruction,
-            temperature=0.75,
+            temperature=temp,
             max_retries=self.max_retries,
             timeout=self.api_timeout
         )
@@ -351,6 +390,11 @@ class AIService:
         else:
             tts_script = format_tts_paragraphs(tts_script, sentences_per_paragraph=3, clean_cliches=True)
 
+        # Verify output uniqueness against all previous stories in the batch (0 tokens)
+        is_unique, uniq_pct, uniq_note = self.uniqueness_guard.verify_and_register(
+            title or "Story", tts_script, original_story, active_chars
+        )
+
         self.last_title = title
         self.last_tts_script = tts_script
         self.last_formatted_output = format_unified_output(
@@ -358,10 +402,13 @@ class AIService:
             self.last_tts_script
         )
         # Update Pre-Check report on the newly rewritten story (0 tokens)
-        self.last_precheck_report = self.pre_checker.analyze_and_prepare(self.last_tts_script)
+        post_report = self.pre_checker.analyze_and_prepare(self.last_tts_script)
+        post_report.uniqueness_score_pct = uniq_pct
+        post_report.uniqueness_note = uniq_note
+        self.last_precheck_report = post_report
 
         self.logger.info(
-            f"Single-pass rewrite completed (Title: {(self.last_title or 'Pending')[:45]})"
+            f"Single-pass rewrite completed (Title: {(self.last_title or 'Pending')[:45]} | Uniqueness: {uniq_pct}%)"
         )
         return self.last_tts_script
 

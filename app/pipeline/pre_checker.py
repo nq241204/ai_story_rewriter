@@ -130,6 +130,8 @@ class PreCheckReport:
     total_sentences: int
     flagged_indices: List[int]
     clean_indices: List[int]
+    uniqueness_score_pct: int = 100
+    uniqueness_note: str = "Truyện độc bản 100% (Hoàn toàn riêng biệt)"
 
     @property
     def total_paragraphs(self) -> int:
@@ -155,6 +157,7 @@ class PreCheckReport:
         lines = [
             "=== BÁO CÁO SƠ TUYỂN PYTHON THUẦN (0 TOKEN) ===",
             f"• Tổng số từ: {self.total_words} từ | Tổng số câu: {self.total_sentences} câu | Số đoạn TTS: {len(self.paragraphs)} đoạn",
+            f"• Độ độc bản (Chống trùng lặp): {self.uniqueness_score_pct}% — {self.uniqueness_note}",
             f"• Đoạn đạt chuẩn (Giữ nguyên - 0 tốn token): {len(self.clean_indices)}/{len(self.paragraphs)} đoạn",
             f"• Đoạn gắn cờ cần trau chuốt: {len(self.flagged_indices)}/{len(self.paragraphs)} đoạn (Ước tính tiết kiệm ~{self.token_savings_estimate_pct}% token)",
             f"• Tên riêng / Nhân vật phát hiện: {', '.join(self.detected_characters) if self.detected_characters else 'Không phát hiện tên riêng rõ ràng'}",
@@ -383,4 +386,236 @@ class PythonPreChecker:
             issue.flags.append(f"Định dạng: {', '.join(issue.format_warnings)}")
 
         return issue
+
+
+@dataclass
+class StoryFingerprint:
+    """Stores 3-gram shingle fingerprints and metadata of a processed story."""
+    title: str
+    source_shingles: Set[str]
+    output_shingles: Set[str]
+    characters: List[str]
+    opening_sentence: str
+
+
+class StoryUniquenessGuard:
+    """
+    Pure-Python Cross-Story Anti-Duplication & Uniqueness Engine (0 AI Tokens).
+    Guarantees every rewritten story is a 100% distinct, standalone story:
+    1. Detects if two input SRT files have overlapping/duplicate source text and automatically
+       recasts character names, setting, and narrative perspective in Python before calling AI.
+    2. Rotates narrative opening hooks & storytelling styles across batch files.
+    3. Tracks used titles, character names, and 3-gram content fingerprints so AI never
+       repeats titles, character names, or phrasing across stories.
+    4. Verifies post-rewrite uniqueness score (%) and triggers a re-spin if similarity is too high.
+    """
+
+    FRESH_MALE_NAMES: List[str] = [
+        "Arthur", "Caleb", "Nathan", "Victor", "Julian", "Grant", "Miles", "Owen",
+        "Warren", "Desmond", "Collin", "Graham", "Trevor", "Preston", "Harrison", "Malcolm",
+        "evan", "logan", "carter", "bennett", "spencer", "mitchell", "garrett", "reid"
+    ]
+
+    FRESH_FEMALE_NAMES: List[str] = [
+        "Evelyn", "Clara", "Hannah", "Rachel", "Diane", "Tessa", "Nora", "Lydia",
+        "Sylvia", "Elena", "Valerie", "Miriam", "Audrey", "Celeste", "Naomi", "Vera",
+        "claire", "vivian", "elise", "fiona", "camille", "lauren", "helena", "cora"
+    ]
+
+    KNOWN_FEMALE_NAMES: Set[str] = {
+        "victoria", "sarah", "emily", "jessica", "rachel", "clara", "hannah", "evelyn",
+        "lydia", "nora", "tessa", "diane", "elena", "chloe", "grace", "lily", "anna",
+        "maria", "lisa", "karen", "susan", "linda", "elizabeth", "emma", "olivia",
+        "sophia", "isabella", "mia", "charlotte", "amelia", "harper", "abigail", "ella",
+        "madison", "scarlett", "aria", "grace", "zok", "alice", "rose", "martha", "helen",
+        "samantha", "ashley", "amanda", "melissa", "nicole", "stephanie", "rebecca",
+        "laura", "sharon", "cynthia", "kathleen", "amy", "angela", "brenda", "pamela",
+        "natalie", "julia", "amber", "megan", "andrea", "danielle", "brittany", "vanessa"
+    }
+
+    NARRATIVE_HOOK_STYLES: List[str] = [
+        "Open immediately with a tense, grounded physical action in the middle of the scene (In-Media-Res Action Hook).",
+        "Open with a sharp, revealing spoken line or confrontation that immediately establishes the conflict (Dialogue/Confrontation Hook).",
+        "Open by contrasting a quiet, ordinary detail of the setting with the sudden arrival of the main conflict (Contrast & Atmosphere Hook).",
+        "Open from the protagonist's calm, observant perspective right as everyone else in the room misjudges them (Observant Underdog Hook).",
+        "Open with a decisive turning-point moment and build the immediate emotional stakes around why it matters (High-Stakes Moment Hook).",
+        "Open with a vivid, realistic workplace or family detail that reveals the unspoken tension between the characters (Grounded Realism Hook).",
+    ]
+
+    def __init__(self):
+        self.history: List[StoryFingerprint] = []
+        self.used_titles: List[str] = []
+        self.used_names: Set[str] = set()
+        self.story_counter: int = 0
+
+    def reset(self) -> None:
+        """Clear all recorded story fingerprints."""
+        self.history.clear()
+        self.used_titles.clear()
+        self.used_names.clear()
+        self.story_counter = 0
+
+    @staticmethod
+    def extract_shingles(text: str, k: int = 3) -> Set[str]:
+        """Extract normalized k-word shingles for fast Jaccard similarity comparison."""
+        words = re.findall(r"[a-z]{2,}", (text or "").lower())
+        if len(words) < k:
+            return set(words)
+        return {" ".join(words[i:i + k]) for i in range(len(words) - k + 1)}
+
+    @staticmethod
+    def jaccard_similarity(set_a: Set[str], set_b: Set[str]) -> float:
+        """Compute Jaccard overlap between two shingle sets (0.0 to 1.0)."""
+        if not set_a or not set_b:
+            return 0.0
+        inter = len(set_a & set_b)
+        union = len(set_a | set_b)
+        return inter / union if union > 0 else 0.0
+
+    def prepare_unique_source_and_directive(
+        self,
+        clean_source: str,
+        detected_chars: List[str],
+    ) -> Tuple[str, List[str], str, bool]:
+        """
+        Inspect incoming source story against all previously processed stories in the session.
+        If the input SRT is a duplicate or near-duplicate of a previous input SRT,
+        automatically recast character names in Python (0 tokens) and add a mandatory
+        setting/perspective transformation directive so the new story is 100% distinct!
+
+        Returns:
+            (transformed_source_text, active_character_names, uniqueness_directive_str, was_source_duplicate)
+        """
+        src_shingles = self.extract_shingles(clean_source, k=3)
+        max_src_sim = 0.0
+        matched_prev: StoryFingerprint | None = None
+
+        for rec in self.history:
+            sim = self.jaccard_similarity(src_shingles, rec.source_shingles)
+            if sim > max_src_sim:
+                max_src_sim = sim
+                matched_prev = rec
+
+        hook_style = self.NARRATIVE_HOOK_STYLES[self.story_counter % len(self.NARRATIVE_HOOK_STYLES)]
+        self.story_counter += 1
+
+        active_chars = list(detected_chars)
+        transformed_source = clean_source
+        was_source_duplicate = max_src_sim >= 0.45
+
+        directive_lines = [f"Narrative Opening Style: {hook_style}"]
+
+        # If source SRT overlaps with a previous file OR shares already-used character names across stories
+        need_name_recast = was_source_duplicate or (
+            len(active_chars) > 0 and any(c in self.used_names for c in active_chars) and len(self.history) > 0
+        )
+
+        if need_name_recast and active_chars:
+            avail_male = [
+                n.capitalize() for n in self.FRESH_MALE_NAMES
+                if n.capitalize() not in self.used_names and n.capitalize() not in active_chars
+            ]
+            avail_female = [
+                n.capitalize() for n in self.FRESH_FEMALE_NAMES
+                if n.capitalize() not in self.used_names and n.capitalize() not in active_chars
+            ]
+            name_map: Dict[str, str] = {}
+            new_chars: List[str] = []
+            for old_name in active_chars:
+                is_female = old_name.lower() in self.KNOWN_FEMALE_NAMES or bool(
+                    re.search(rf'\b{re.escape(old_name)}\b[^.!?]{{1,40}}\b(?:she|her|hers|woman|wife|mother|sister|daughter|girl)\b', clean_source, re.IGNORECASE)
+                )
+                pool = avail_female if is_female else avail_male
+                if pool:
+                    replacement = pool.pop(0)
+                    name_map[old_name] = replacement
+                    new_chars.append(replacement)
+                else:
+                    new_chars.append(old_name)
+
+            for old_n, new_n in name_map.items():
+                transformed_source = re.sub(rf'\b{re.escape(old_n)}\b', new_n, transformed_source)
+            active_chars = new_chars
+
+        if was_source_duplicate and matched_prev:
+            directive_lines.append(
+                "CRITICAL UNIQUENESS MANDATE: A previous story had a similar plot outline "
+                f"(previous title: '{matched_prev.title}'). You MUST make this a 100% SEPARATE, STANDALONE STORY: "
+                "change the specific setting/location, alter the characters' backgrounds and dialogue wording completely, "
+                "use a totally different opening scene, and generate a completely different title!"
+            )
+        elif self.used_titles:
+            recent_titles = "; ".join(self.used_titles[-4:])
+            avoid_names = ", ".join(list(self.used_names)[-8:])
+            directive_lines.append(
+                f"Uniqueness Rule: Every story must be 100% distinct. Do NOT reuse phrasing or title patterns from recent titles ({recent_titles})."
+            )
+            if avoid_names and not active_chars:
+                directive_lines.append(
+                    f"If inventing character names, pick fresh names and do NOT use: {avoid_names}."
+                )
+
+        return transformed_source, active_chars, "\n".join(directive_lines), was_source_duplicate
+
+    def verify_and_register(
+        self,
+        title: str,
+        rewritten_script: str,
+        source_text: str,
+        characters: List[str],
+    ) -> Tuple[bool, int, str]:
+        """
+        Verify that the newly rewritten story is distinct from all previously generated stories,
+        then register its fingerprint in memory.
+
+        Returns:
+            (is_unique, uniqueness_score_pct, uniqueness_note_vi)
+        """
+        out_shingles = self.extract_shingles(rewritten_script, k=3)
+        src_shingles = self.extract_shingles(source_text, k=3)
+        sentences = split_into_sentences(rewritten_script)
+        opening = sentences[0] if sentences else ""
+
+        max_out_sim = 0.0
+        max_title_sim = 0.0
+        most_similar_title = ""
+
+        for rec in self.history:
+            out_sim = self.jaccard_similarity(out_shingles, rec.output_shingles)
+            if out_sim > max_out_sim:
+                max_out_sim = out_sim
+                most_similar_title = rec.title
+
+            if title and rec.title:
+                t_sim = SequenceMatcher(None, title.lower(), rec.title.lower()).ratio()
+                if t_sim > max_title_sim:
+                    max_title_sim = t_sim
+
+        uniqueness_score_pct = max(0, min(100, int(round((1.0 - max_out_sim) * 100))))
+        is_unique = (max_out_sim < 0.35) and (max_title_sim < 0.78)
+
+        # Register in history
+        self.history.append(
+            StoryFingerprint(
+                title=title or "Story",
+                source_shingles=src_shingles,
+                output_shingles=out_shingles,
+                characters=list(characters),
+                opening_sentence=opening,
+            )
+        )
+        if title:
+            self.used_titles.append(title)
+        for c in characters:
+            self.used_names.add(c)
+
+        if is_unique:
+            note_vi = f"Truyện độc bản hoàn toàn riêng biệt (Khác biệt {uniqueness_score_pct}% so với {len(self.history) - 1} truyện trước)"
+        else:
+            note_vi = (
+                f"Cảnh báo trùng lặp ({100 - uniqueness_score_pct}% giống '{most_similar_title[:35]}') — Cần biến đổi góc kể!"
+            )
+
+        return is_unique, uniqueness_score_pct, note_vi
+
 

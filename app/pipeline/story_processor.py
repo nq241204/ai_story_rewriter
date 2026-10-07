@@ -99,6 +99,14 @@ class StoryProcessor:
         start_time = time.time()
         filename = os.path.basename(input_path)
 
+        # Guarantee clean per-file state before starting
+        self.original_story = None
+        self.story_analysis = None
+        self.rewritten_story = None
+        self.title = None
+        if self.ai_service and hasattr(self.ai_service, "reset_state"):
+            self.ai_service.reset_state()
+
         self.logger.info(f"Processing file: {filename}")
 
         try:
@@ -200,8 +208,11 @@ class StoryProcessor:
 
             tts_script = format_tts_paragraphs(self.rewritten_story, sentences_per_paragraph=3, clean_cliches=True)
             formatted_output = format_unified_output(self.title, tts_script)
-            post_report = self.pre_checker.analyze_and_prepare(tts_script)
-            precheck_report_text = post_report.to_vietnamese_summary()
+            if hasattr(self.ai_service, "last_precheck_report") and getattr(self.ai_service, "last_precheck_report", None):
+                precheck_report_text = self.ai_service.last_precheck_report.to_vietnamese_summary()
+            else:
+                post_report = self.pre_checker.analyze_and_prepare(tts_script)
+                precheck_report_text = post_report.to_vietnamese_summary()
 
             new_entries = []
             if self.export_srt:
