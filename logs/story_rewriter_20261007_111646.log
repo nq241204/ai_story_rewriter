@@ -1,0 +1,9 @@
+11:16:46 - INFO - Starting AI Story Rewriter
+11:16:47 - INFO - Gemini client initialized with model: gemini-2.5-flash
+11:16:47 - INFO - Application started
+11:16:51 - INFO - Gemini client initialized with model: gemini-2.5-flash
+11:16:51 - ERROR - Connection test failed: 404 NOT_FOUND. {'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements. We recommend you to use the Interactions API (https://ai.google.dev/gemini-api/docs/get-started).', 'status': 'NOT_FOUND'}}
+11:16:56 - INFO - Gemini client initialized with model: gemini-2.5-flash
+11:16:56 - ERROR - Connection test failed: 404 NOT_FOUND. {'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements. We recommend you to use the Interactions API (https://ai.google.dev/gemini-api/docs/get-started).', 'status': 'NOT_FOUND'}}
+11:16:59 - INFO - Gemini client initialized with model: gemini-2.5-flash
+11:17:00 - ERROR - Connection test failed: 404 NOT_FOUND. {'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements. We recommend you to use the Interactions API (https://ai.google.dev/gemini-api/docs/get-started).', 'status': 'NOT_FOUND'}}

@@ -1,0 +1,46 @@
+23:57:06 - INFO - Processing file: 001.srt
+23:57:06 - INFO - SRT parsed successfully
+23:57:06 - INFO - Output saved to: 001_Test_Title.srt
+23:57:06 - INFO - Story context cleared
+23:57:06 - INFO - Processing file: 001.srt
+23:57:06 - INFO - SRT parsed successfully
+23:57:06 - WARNING - QC failed with 2 issues
+23:57:06 - INFO - QC correction attempt 1
+23:57:06 - INFO - QC passed after correction
+23:57:06 - INFO - Output saved to: 001_Test_Title.srt
+23:57:06 - INFO - Story context cleared
+23:57:06 - INFO - Processing file: 001.srt
+23:57:06 - INFO - SRT parsed successfully
+23:57:06 - ERROR - Processing failed for 001.srt: Failed to rewrite story
+23:57:06 - INFO - Failed file saved to: test_output\failed\001.srt
+23:57:06 - INFO - Story context cleared
+23:57:06 - INFO - Processing file: 001.srt
+23:57:06 - INFO - SRT parsed successfully
+23:57:06 - WARNING - Title generation failed, using fallback
+23:57:06 - INFO - Output saved to: 001_Story.srt
+23:57:06 - INFO - Story context cleared
+23:57:06 - INFO - Processing file: 001.srt
+23:57:06 - INFO - SRT parsed successfully
+23:57:06 - INFO - Output saved to: 001_Test_Title.srt
+23:57:06 - INFO - Story context cleared
+23:57:06 - INFO - Processing file: 002.srt
+23:57:06 - INFO - SRT parsed successfully
+23:57:06 - INFO - Output saved to: 002_Test_Title.srt
+23:57:06 - INFO - Story context cleared
+23:57:06 - INFO - Processing file: 001.srt
+23:57:06 - ERROR - Processing failed for 001.srt: No valid subtitle entries found
+23:57:06 - INFO - Failed file saved to: test_output\failed\001.srt
+23:57:06 - INFO - Story context cleared
+23:57:06 - INFO - Processing file: 001.srt
+23:57:06 - ERROR - Processing failed for 001.srt: No valid subtitle entries found
+23:57:06 - INFO - Failed file saved to: test_output\failed\001.srt
+23:57:06 - INFO - Story context cleared
+23:57:06 - INFO - Processing file: 001.srt
+23:57:06 - INFO - SRT parsed successfully
+23:57:06 - ERROR - Processing failed for 001.srt: Failed to rewrite story
+23:57:06 - INFO - Failed file saved to: test_output\failed\001.srt
+23:57:06 - INFO - Story context cleared
+23:57:06 - INFO - Processing file: 001.srt
+23:57:06 - INFO - SRT parsed successfully
+23:57:06 - ERROR - Processing failed for 001.srt: Failed to rewrite story
+23:57:06 - INFO - Story context cleared

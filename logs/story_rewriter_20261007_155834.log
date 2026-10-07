@@ -1,0 +1,10 @@
+15:58:34 - INFO - Starting AI Story Rewriter
+15:58:35 - INFO - Gemini client initialized with model: gemini-3.8-flash
+15:58:35 - INFO - Application started
+15:58:42 - INFO - Gemini client initialized with model: gemini-3.8-flash
+15:58:42 - INFO - Testing Gemini connection with model: gemini-3.8-flash
+15:58:42 - ERROR - Connection test failed (model=gemini-3.8-flash): Models.generate_content() got an unexpected keyword argument 'timeout'
+15:58:42 - WARNING - Switching to fallback model: gemini-3.7-flash
+15:58:42 - INFO - Testing Gemini connection with model: gemini-3.7-flash
+15:58:42 - ERROR - Connection test failed (model=gemini-3.7-flash): Models.generate_content() got an unexpected keyword argument 'timeout'
+15:58:42 - ERROR - Gemini API connection test failed.

@@ -1,0 +1,5 @@
+15:41:05 - INFO - Starting AI Story Rewriter
+15:41:06 - INFO - Gemini client initialized with model: gemini-3.8-flash
+15:41:06 - INFO - Application started
+15:41:15 - INFO - Gemini client initialized with model: gemini-3.8-flash
+15:41:15 - INFO - Testing Gemini connection with model: gemini-3.8-flash
