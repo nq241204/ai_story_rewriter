@@ -278,7 +278,47 @@ class TestSinglePassTTS(unittest.TestCase):
             if os.path.exists(out_dir):
                 shutil.rmtree(out_dir)
 
+    def test_manual_story_tags_and_keys_detection(self):
+        """Verify manual story tags & keys merge with Python auto-detection and guide AI rewrite prompt."""
+        checker = PythonPreChecker()
+        sample_text = (
+            "The arrogant manager laughed at the old janitor's boots. "
+            "Nobody knew the janitor owned the entire corporate building and the board of directors."
+        )
+        report = checker.analyze_and_prepare(
+            sample_text,
+            manual_tags="Secret Billionaire, Instant Karma",
+            manual_keys="janitor owns the building, arrogant manager fired",
+        )
+        # Manual tags & keys must appear first in detected lists
+        self.assertIn("Secret Billionaire", report.detected_genre_tags)
+        self.assertIn("Instant Karma", report.detected_genre_tags)
+        self.assertIn("janitor owns the building", report.detected_hook_keys)
+        summary_vi = report.to_vietnamese_summary()
+        self.assertIn("Thể loại (Tag truyện): Secret Billionaire, Instant Karma", summary_vi)
+        self.assertIn("Từ khóa trọng tâm (Key & Hook): janitor owns the building", summary_vi)
+
+        # Verify AIService injects manual tags & keys into Gemini rewrite prompt
+        dummy_client = DummyGeminiClient()
+        ai_service = AIService(
+            dummy_client,
+            workflow_mode="full_ai",
+            story_tags="Secret Billionaire, Instant Karma",
+            story_keys="janitor owns the building, arrogant manager fired",
+        )
+        ai_service.run_precheck(sample_text)
+        ai_service.rewrite_story(sample_text)
+        self.assertIn(
+            "Story Genre / Tags (lock onto this exact tone, emotional pacing, and payoff): Secret Billionaire, Instant Karma",
+            dummy_client.last_prompt,
+        )
+        self.assertIn(
+            "Core Hook Keywords (build the opening hook, dramatic tension, and YouTube CTR title around these elements): janitor owns the building",
+            dummy_client.last_prompt,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

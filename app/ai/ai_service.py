@@ -28,6 +28,8 @@ class AIService:
         use_ai_analysis: bool = False,
         use_ai_qc: bool = False,
         workflow_mode: str = "full_ai",  # "full_ai", "hybrid", "python_only"
+        story_tags: str = "",
+        story_keys: str = "",
     ):
         """
         Initialize AI service.
@@ -52,6 +54,8 @@ class AIService:
         self.use_ai_analysis = use_ai_analysis
         self.use_ai_qc = use_ai_qc
         self.workflow_mode = (workflow_mode or "full_ai").lower()
+        self.story_tags = (story_tags or "").strip()
+        self.story_keys = (story_keys or "").strip()
 
         # Cached outputs for the current file (isolated per call)
         self._last_source_hash: Optional[int] = None
@@ -81,10 +85,15 @@ class AIService:
     def run_precheck(self, story: str) -> PreCheckReport:
         """
         Run the pure-Python Pre-Checker (0 tokens, processes millions of words in seconds).
-        Detects repetitive words, proper noun typos, long sentences, and formatting issues.
+        Detects repetitive words, proper noun typos, long sentences, formatting issues,
+        and combines manual Tag/Key inputs with auto-detected genre & hook signals.
         """
         self._last_source_hash = hash(story)
-        report = self.pre_checker.analyze_and_prepare(story)
+        report = self.pre_checker.analyze_and_prepare(
+            story,
+            manual_tags=self.story_tags,
+            manual_keys=self.story_keys,
+        )
         self._pending_source_report = report
         self.last_precheck_report = report
         self.logger.info(
@@ -351,6 +360,14 @@ class AIService:
             f"Target story length: maintain or enrich depth (~{max(report.total_words, 120)} words, never summarize).",
             uniqueness_directive,
         ]
+        if report.detected_genre_tags:
+            notes.append(
+                f"Story Genre / Tags (lock onto this exact tone, emotional pacing, and payoff): {', '.join(report.detected_genre_tags)}."
+            )
+        if report.detected_hook_keys:
+            notes.append(
+                f"Core Hook Keywords (build the opening hook, dramatic tension, and YouTube CTR title around these elements): {', '.join(report.detected_hook_keys)}."
+            )
         if active_chars:
             notes.append(f"Main characters (use these exact names consistently): {', '.join(active_chars)}.")
         if report.flagged_indices:
@@ -402,7 +419,11 @@ class AIService:
             self.last_tts_script
         )
         # Update Pre-Check report on the newly rewritten story (0 tokens)
-        post_report = self.pre_checker.analyze_and_prepare(self.last_tts_script)
+        post_report = self.pre_checker.analyze_and_prepare(
+            self.last_tts_script,
+            manual_tags=self.story_tags,
+            manual_keys=self.story_keys,
+        )
         post_report.uniqueness_score_pct = uniq_pct
         post_report.uniqueness_note = uniq_note
         self.last_precheck_report = post_report

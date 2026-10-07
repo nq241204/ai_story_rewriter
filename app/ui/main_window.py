@@ -54,6 +54,16 @@ WORKFLOW_KEY_TO_UI = {
     "python_only": "Chỉ Sơ Tuyển Python (0 Token — Xuất báo cáo lỗi để người tự sửa)",
 }
 
+PRESET_GENRE_TAGS = {
+    "-- Chọn nhanh Tag thể loại mẫu (Hoặc tự nhập bên cạnh) --": "",
+    "Giàu ngầm / Chủ tịch giả nghèo (Secret Billionaire / Underdog)": "Secret Billionaire, Underdog, Disguised Owner, Instant Regret",
+    "Karma / Báo ứng & Hối hận muộn màng (Instant Karma / Regret)": "Instant Karma, Deep Regret, Tables Turned, Justice Served",
+    "Phản bội gia đình / Gia tài (Family Betrayal / Inheritance)": "Family Betrayal, Golden Child, Inheritance Twist, Cutting Ties",
+    "Hàng xóm hống hách / Pháp lý (Entitled Neighbor / HOA Revenge)": "HOA Drama, Entitled Neighbor, Property Line, Legal Revenge",
+    "Công sở / Sếp kiêu ngạo trả giá (Workplace Karma / Bad Boss)": "Bad Boss, Workplace Justice, Fired Top Employee, Company Collapse",
+    "Cảm động / Chữa lành & Tình thân (Emotional / Wholesome Drama)": "Emotional Drama, Kindness Repaid, Heartwarming Twist, Life Lesson",
+}
+
 
 class BatchWorker(QThread):
     """Worker thread for non-blocking batch processing."""
@@ -131,7 +141,12 @@ class MainWindow(QMainWindow):
                 use_ai_analysis=False,
                 use_ai_qc=settings.use_ai_qc,
                 workflow_mode=settings.workflow_mode,
+                story_tags=settings.story_tags,
+                story_keys=settings.story_keys,
             )
+        else:
+            self.ai_service.story_tags = settings.story_tags
+            self.ai_service.story_keys = settings.story_keys
 
         if not self.story_processor:
             self.story_processor = StoryProcessor(
@@ -302,6 +317,34 @@ class MainWindow(QMainWindow):
         folder_layout.addLayout(output_group, 1)
 
         queue_layout.addLayout(folder_layout)
+
+        # Manual Story Tags (Genre) & Story Keys (Hook Focus) Bar right in Queue Tab
+        queue_layout.addWidget(
+            SectionHeader("ĐỊNH HƯỚNG THỂ LOẠI (TAG TRUYỆN) & TỪ KHÓA MỞ BÀI (KEY HOOK THỦ CÔNG)")
+        )
+
+        tag_row = QHBoxLayout()
+        tag_row.addWidget(QLabel("Tag thể loại:"))
+        self.preset_tag_combo = QComboBox()
+        self.preset_tag_combo.addItems(list(PRESET_GENRE_TAGS.keys()))
+        self.preset_tag_combo.currentIndexChanged.connect(self.on_preset_tag_selected)
+        tag_row.addWidget(self.preset_tag_combo, 1)
+
+        self.story_tags_edit = QLineEdit()
+        self.story_tags_edit.setPlaceholderText(
+            "Nhập Tag thể loại thủ công (VD: Secret Billionaire, Karma, Phản bội gia đình...)"
+        )
+        tag_row.addWidget(self.story_tags_edit, 2)
+        queue_layout.addLayout(tag_row)
+
+        key_row = QHBoxLayout()
+        key_row.addWidget(QLabel("Key truyện & Hook:"))
+        self.story_keys_edit = QLineEdit()
+        self.story_keys_edit.setPlaceholderText(
+            "Nhập từ khóa cốt lõi / tình huống Hook để AI xoáy sâu (VD: bị đuổi khỏi showroom, mua đứt cả tòa nhà, di chúc bí mật...)"
+        )
+        key_row.addWidget(self.story_keys_edit, 1)
+        queue_layout.addLayout(key_row)
 
         # Scan button
         self.btn_scan = QPushButton("Quét Thứ Tự File Tự Nhiên (Python Thuần — 0 Tốn Token)")
@@ -669,8 +712,19 @@ class MainWindow(QMainWindow):
             use_ai_analysis=False,
             use_ai_qc=settings.use_ai_qc,
             workflow_mode=settings.workflow_mode,
+            story_tags=settings.story_tags,
+            story_keys=settings.story_keys,
         )
         self._init_pipeline_components()
+
+    def on_preset_tag_selected(self, index: int):
+        """Fill manual story tags input when user picks a preset genre tag from dropdown."""
+        if index < 0:
+            return
+        label = self.preset_tag_combo.currentText()
+        preset_value = PRESET_GENRE_TAGS.get(label, "")
+        if preset_value:
+            self.story_tags_edit.setText(preset_value)
 
     def load_settings(self):
         """Load settings into UI."""
@@ -680,10 +734,12 @@ class MainWindow(QMainWindow):
         self.model_combo.setCurrentText(settings.model_name)
         self.input_path_edit.setText(settings.input_folder)
         self.output_path_edit.setText(settings.output_folder)
+        self.story_tags_edit.setText(settings.story_tags)
+        self.story_keys_edit.setText(settings.story_keys)
 
         ui_workflow = WORKFLOW_KEY_TO_UI.get(
             settings.workflow_mode.lower(),
-            WORKFLOW_KEY_TO_UI["hybrid"]
+            WORKFLOW_KEY_TO_UI["full_ai"]
         )
         self.workflow_combo.setCurrentText(ui_workflow)
 
@@ -707,7 +763,7 @@ class MainWindow(QMainWindow):
         )
         workflow_key = WORKFLOW_UI_TO_KEY.get(
             self.workflow_combo.currentText(),
-            "hybrid"
+            "full_ai"
         )
         self.settings_manager.update(
             api_key=self.api_key_edit.text().strip(),
@@ -722,6 +778,8 @@ class MainWindow(QMainWindow):
             export_srt=self.chk_export.isChecked(),
             skip_processed=self.chk_skip_processed.isChecked(),
             use_ai_qc=self.chk_ai_qc.isChecked(),
+            story_tags=self.story_tags_edit.text().strip(),
+            story_keys=self.story_keys_edit.text().strip(),
         )
 
         self.init_ai()
@@ -906,6 +964,13 @@ class MainWindow(QMainWindow):
     # HYBRID RESULT VIEWER & EDITOR ("SƠ TUYỂN PYTHON & SỬA KẾT QUẢ")
     # ============================================================
 
+    def _get_current_tags_and_keys(self):
+        """Return currently entered manual story tags and keys from UI."""
+        return (
+            self.story_tags_edit.text().strip(),
+            self.story_keys_edit.text().strip(),
+        )
+
     def run_python_precheck_on_editor(self):
         """Run 0-token pure-Python Pre-Check on the current text in the editor."""
         raw_script = self.edit_script_text.toPlainText().strip()
@@ -913,7 +978,10 @@ class MainWindow(QMainWindow):
             self.log_message("Chưa có nội dung trong khung kịch bản để chạy Sơ tuyển Python")
             return
 
-        report = self.pre_checker.analyze_and_prepare(raw_script)
+        manual_tags, manual_keys = self._get_current_tags_and_keys()
+        report = self.pre_checker.analyze_and_prepare(
+            raw_script, manual_tags=manual_tags, manual_keys=manual_keys
+        )
         self.precheck_report_box.setPlainText(report.to_vietnamese_summary())
         self.edit_script_text.setPlainText("\n\n".join(report.paragraphs))
         self.log_message(
@@ -934,7 +1002,10 @@ class MainWindow(QMainWindow):
             self.log_message("Vui lòng nhập Gemini API Key trong tab Cài Đặt trước khi gọi AI")
             return
 
-        report = self.pre_checker.analyze_and_prepare(raw_script)
+        manual_tags, manual_keys = self._get_current_tags_and_keys()
+        report = self.pre_checker.analyze_and_prepare(
+            raw_script, manual_tags=manual_tags, manual_keys=manual_keys
+        )
         self.precheck_report_box.setPlainText(report.to_vietnamese_summary())
 
         if not report.flagged_indices:
@@ -1002,7 +1073,10 @@ class MainWindow(QMainWindow):
             self.edit_script_text.setPlainText(script_text)
 
             # Automatically run 0-token Python Pre-Check report on the loaded script
-            report = self.pre_checker.analyze_and_prepare(script_text)
+            manual_tags, manual_keys = self._get_current_tags_and_keys()
+            report = self.pre_checker.analyze_and_prepare(
+                script_text, manual_tags=manual_tags, manual_keys=manual_keys
+            )
             self.precheck_report_box.setPlainText(report.to_vietnamese_summary())
         except Exception as e:
             self.log_message(f"Không thể đọc file kết quả: {e}")
@@ -1012,7 +1086,10 @@ class MainWindow(QMainWindow):
         raw_script = self.edit_script_text.toPlainText()
         formatted = format_tts_paragraphs(raw_script, sentences_per_paragraph=3)
         self.edit_script_text.setPlainText(formatted)
-        report = self.pre_checker.analyze_and_prepare(formatted)
+        manual_tags, manual_keys = self._get_current_tags_and_keys()
+        report = self.pre_checker.analyze_and_prepare(
+            formatted, manual_tags=manual_tags, manual_keys=manual_keys
+        )
         self.precheck_report_box.setPlainText(report.to_vietnamese_summary())
         self.log_message("Đã chuẩn hóa kịch bản thành đoạn ngắn 2-3 câu/đoạn cho TTS")
 

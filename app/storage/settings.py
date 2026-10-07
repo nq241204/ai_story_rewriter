@@ -26,6 +26,8 @@ class AppSettings:
     export_srt: bool = False  # False = export clean TTS .txt only (faster, 50% less tokens)
     skip_processed: bool = True  # Skip already completed files in output folder
     use_ai_qc: bool = False  # False = pure Python QC (0 extra AI tokens)
+    story_tags: str = ""  # Manual genre/theme tags (e.g. "Karma, Secret Billionaire, Family Betrayal")
+    story_keys: str = ""  # Manual hook keywords/plot keys (e.g. "kicked out of dealership, bought the building")
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

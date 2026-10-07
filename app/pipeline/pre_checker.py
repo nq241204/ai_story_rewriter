@@ -119,6 +119,34 @@ class ParagraphIssue:
         return len(self.flags) > 0
 
 
+# Pure-Python 0-token Genre & Hook Keyword Signals
+GENRE_SIGNAL_MAP: Dict[str, List[str]] = {
+    "Secret Billionaire / Underdog (Giàu ngầm / Khinh thường & Cái kết)": [
+        "billionaire", "millionaire", "ceo", "owner", "janitor", "mechanic",
+        "overalls", "poor", "luxury", "dealership", "mansion", "estate",
+        "first class", "waiter", "afford", "security", "vip"
+    ],
+    "Family Betrayal & Inheritance (Phản bội gia đình / Gia tài)": [
+        "wedding", "bride", "groom", "parents", "mother", "father", "sister",
+        "brother", "inheritance", "will", "deed", "golden child", "divorce",
+        "ex-wife", "ex-husband", "college fund", "trust fund"
+    ],
+    "Instant Karma / Entitled Revenge (Báo ứng / Trả thù thông minh)": [
+        "hoa", "neighbor", "fence", "property line", "survey", "tow",
+        "driveway", "fine", "evict", "eviction", "lawsuit", "court",
+        "judge", "lawyer", "arrested", "police", "karma", "regret"
+    ],
+    "Workplace Justice / Bad Boss (Công sở / Sếp kiêu ngạo trả giá)": [
+        "boss", "manager", "fired", "quit", "resign", "client", "contract",
+        "department", "company", "salary", "overtime", "hr", "promoted"
+    ],
+    "Emotional / Wholesome Drama (Cảm động / Chữa lành & Tình người)": [
+        "hospital", "doctor", "orphan", "homeless", "kindness", "saved",
+        "years later", "grateful", "shelter", "surgery", "forgive"
+    ],
+}
+
+
 @dataclass
 class PreCheckReport:
     """Comprehensive pure-Python pre-check report (0 AI tokens used)."""
@@ -132,6 +160,8 @@ class PreCheckReport:
     clean_indices: List[int]
     uniqueness_score_pct: int = 100
     uniqueness_note: str = "Truyện độc bản 100% (Hoàn toàn riêng biệt)"
+    detected_genre_tags: List[str] = field(default_factory=list)
+    detected_hook_keys: List[str] = field(default_factory=list)
 
     @property
     def total_paragraphs(self) -> int:
@@ -154,9 +184,13 @@ class PreCheckReport:
 
     def to_vietnamese_summary(self) -> str:
         """Generate a human-readable Vietnamese Pre-Check Report for the UI."""
+        tags_str = ", ".join(self.detected_genre_tags) if self.detected_genre_tags else "Drama / Tự sự đời thực"
+        keys_str = ", ".join(self.detected_hook_keys) if self.detected_hook_keys else "Tự động theo khung sườn"
         lines = [
             "=== BÁO CÁO SƠ TUYỂN PYTHON THUẦN (0 TOKEN) ===",
             f"• Tổng số từ: {self.total_words} từ | Tổng số câu: {self.total_sentences} câu | Số đoạn TTS: {len(self.paragraphs)} đoạn",
+            f"• Thể loại (Tag truyện): {tags_str}",
+            f"• Từ khóa trọng tâm (Key & Hook): {keys_str}",
             f"• Độ độc bản (Chống trùng lặp): {self.uniqueness_score_pct}% — {self.uniqueness_note}",
             f"• Đoạn đạt chuẩn (Giữ nguyên - 0 tốn token): {len(self.clean_indices)}/{len(self.paragraphs)} đoạn",
             f"• Đoạn gắn cờ cần trau chuốt: {len(self.flagged_indices)}/{len(self.paragraphs)} đoạn (Ước tính tiết kiệm ~{self.token_savings_estimate_pct}% token)",
@@ -192,6 +226,7 @@ class PythonPreChecker:
     3. Detects proper nouns (character names) and fuzzy spelling inconsistencies.
     4. Detects overly long sentences (>35 words) or choppy caption fragments.
     5. Detects AI writing clichés ("dấu vết AI") & formatting anomalies.
+    6. Combines manual Tag/Key inputs with 0-token auto-detected genre & hook signals.
     """
 
     def __init__(
@@ -204,9 +239,15 @@ class PythonPreChecker:
         self.min_paragraph_words = min_paragraph_words
         self.repetition_threshold = repetition_threshold
 
-    def analyze_and_prepare(self, raw_text: str) -> PreCheckReport:
+    def analyze_and_prepare(
+        self,
+        raw_text: str,
+        manual_tags: str = "",
+        manual_keys: str = "",
+    ) -> PreCheckReport:
         """
-        Run full pure-Python pre-check on raw SRT/story text.
+        Run full pure-Python pre-check on raw SRT/story text, combining manual
+        story tags & hook keys with 0-token automatic genre/hook detection.
         """
         # 1. Strip SRT artifacts and format into initial 2-3 sentence TTS paragraphs
         clean_text = format_tts_paragraphs(raw_text, sentences_per_paragraph=3)
@@ -218,7 +259,10 @@ class PythonPreChecker:
         # 2. Extract character names & check for inconsistent proper noun spelling
         detected_chars, noun_variants, suspect_to_canonical = self._detect_proper_nouns_and_typos(clean_text)
 
-        # 3. Inspect each paragraph for the 5 categories of issues
+        # 3. Combine manual Tags & Keys with pure-Python 0-token auto-detected Genre & Hook signals
+        genre_tags, hook_keys = self._detect_genre_and_hooks(clean_text, manual_tags, manual_keys)
+
+        # 4. Inspect each paragraph for the 5 categories of issues
         paragraph_issues: List[ParagraphIssue] = []
         flagged_indices: List[int] = []
         clean_indices: List[int] = []
@@ -240,7 +284,49 @@ class PythonPreChecker:
             total_sentences=len(all_sentences),
             flagged_indices=flagged_indices,
             clean_indices=clean_indices,
+            detected_genre_tags=genre_tags,
+            detected_hook_keys=hook_keys,
         )
+
+    def _detect_genre_and_hooks(
+        self,
+        text: str,
+        manual_tags: str = "",
+        manual_keys: str = "",
+    ) -> Tuple[List[str], List[str]]:
+        """
+        Merge user-specified manual tags/keys with pure-Python 0-token genre & hook detection.
+        """
+        tags: List[str] = []
+        keys: List[str] = []
+
+        if manual_tags and manual_tags.strip():
+            for t in re.split(r'[,;|]+', manual_tags):
+                if t.strip() and t.strip() not in tags:
+                    tags.append(t.strip())
+
+        if manual_keys and manual_keys.strip():
+            for k in re.split(r'[,;|]+', manual_keys):
+                if k.strip() and k.strip() not in keys:
+                    keys.append(k.strip())
+
+        text_lower = (text or "").lower()
+        scored_genres: List[Tuple[int, str, List[str]]] = []
+
+        for genre_name, kw_list in GENRE_SIGNAL_MAP.items():
+            matched_kws = [kw for kw in kw_list if re.search(rf'\b{re.escape(kw)}\b', text_lower)]
+            if matched_kws:
+                scored_genres.append((len(matched_kws), genre_name, matched_kws))
+
+        scored_genres.sort(key=lambda x: x[0], reverse=True)
+        for _, g_name, matched_kws in scored_genres[:2]:
+            if g_name not in tags:
+                tags.append(g_name)
+            for m_kw in matched_kws[:4]:
+                if m_kw not in keys:
+                    keys.append(m_kw)
+
+        return tags, keys
 
     def normalize_proper_nouns_in_text(self, text: str, report: PreCheckReport) -> str:
         """
