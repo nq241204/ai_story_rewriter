@@ -12,6 +12,7 @@ from app.utils.text_utils import (
 )
 from app.ai.ai_service import AIService
 from app.pipeline.story_processor import StoryProcessor, ProcessingState
+from app.pipeline.pre_checker import PythonPreChecker
 
 
 class DummyGeminiClient:
@@ -19,10 +20,21 @@ class DummyGeminiClient:
 
     def __init__(self):
         self.api_calls = 0
+        self.last_prompt = ""
         self.model_name = "gemini-2.5-flash"
 
     def generate_content(self, prompt, system_instruction=None, temperature=0.7, max_retries=3, timeout=60):
         self.api_calls += 1
+        self.last_prompt = prompt
+        if "[P#" in prompt:
+            return (
+                "---TITLE---\n"
+                "She Thought He Was Poor Until The Helicopter Landed\n\n"
+                "---FIXED_PARAGRAPHS---\n"
+                "[P#1]\n"
+                "Marcus stepped forward calmly as the entire hall fell dead silent. "
+                "Every guest realized the man they mocked owned the estate."
+            )
         return (
             "---TITLE---\n"
             "She Thought He Was Poor Until The Helicopter Landed\n\n"
@@ -39,7 +51,7 @@ class DummyGeminiClient:
 
 
 class TestSinglePassTTS(unittest.TestCase):
-    """Test cases for single-pass TTS output, pure-Python token optimizations, and Vietnamese UI."""
+    """Test cases for single-pass TTS output, pure-Python token optimizations, Hybrid Workflow, and Vietnamese UI."""
 
     def test_parse_unified_ai_output(self):
         """Test parsing ---TITLE--- and ---TTS_SCRIPT--- sections."""
@@ -70,10 +82,73 @@ class TestSinglePassTTS(unittest.TestCase):
         raw_with_timecode = "1\n00:00:01,000 --> 00:00:04,000\nHello world.\n"
         self.assertEqual(strip_srt_artifacts(raw_with_timecode), "Hello world.")
 
-    def test_single_api_call_per_story(self):
-        """Verify that processing an entire story makes ONLY 1 Gemini API call (saving 75%+ tokens)."""
+    def test_python_prechecker_flags_issues_zero_tokens(self):
+        """Verify pure-Python Pre-Checker detects repetitive words, proper noun variants, and long sentences."""
+        checker = PythonPreChecker()
+        raw_text = (
+            "Marcus entered the grand ballroom quietly. Everyone stared at his old jacket. "
+            "Marcus said nothing to the crowd.\n\n"
+            "Suddenly Marucs walked toward the stage and suddenly he grabbed the microphone "
+            "and suddenly the music stopped while every single rich guest in the massive "
+            "chandelier-lit hall wondered why this poor janitor was standing next to the CEO "
+            "without anyone stopping him at all"
+        )
+        report = checker.analyze_and_prepare(raw_text)
+        self.assertEqual(report.total_paragraphs, 2)
+        # Paragraph 0 is clean, Paragraph 1 has proper noun variant (Marucs vs Marcus), repetition (suddenly), long sentence, and missing period
+        self.assertNotIn(0, report.flagged_indices)
+        self.assertIn(1, report.flagged_indices)
+        self.assertIn("Marcus", report.proper_noun_variants)
+        self.assertIn("Marucs", report.proper_noun_variants["Marcus"])
+        summary_vi = report.to_vietnamese_summary()
+        self.assertIn("BÁO CÁO SƠ TUYỂN PYTHON THUẦN (0 TOKEN)", summary_vi)
+        self.assertIn("Đoạn #2", summary_vi)
+
+    def test_hybrid_workflow_targeted_ai_and_python_only(self):
+        """Verify Hybrid mode only sends flagged paragraphs to AI and Python-only mode uses 0 API calls."""
         dummy_client = DummyGeminiClient()
-        ai_service = AIService(dummy_client, use_ai_analysis=False, use_ai_qc=False)
+        ai_service = AIService(
+            dummy_client,
+            use_ai_analysis=False,
+            use_ai_qc=False,
+            workflow_mode="hybrid",
+        )
+        raw_story = (
+            "Marcus entered the grand ballroom quietly. Everyone stared at his old jacket. "
+            "Marcus said nothing to the crowd.\n\n"
+            "Suddenly Marucs walked toward the stage and suddenly he grabbed the microphone "
+            "and suddenly the music stopped while every single rich guest in the massive "
+            "chandelier-lit hall wondered why this poor janitor was standing next to the CEO "
+            "without anyone stopping him at all"
+        )
+        ai_service.analyze_story(raw_story)
+        script = ai_service.rewrite_story(raw_story)
+        title = ai_service.generate_title(script)
+
+        self.assertEqual(dummy_client.api_calls, 1)
+        # Only [P#1] should be sent in the targeted prompt
+        self.assertIn("[P#1]", dummy_client.last_prompt)
+        self.assertNotIn("[P#0]", dummy_client.last_prompt)
+        self.assertEqual(title, "She Thought He Was Poor Until The Helicopter Landed")
+        # Paragraph 0 kept intact + Paragraph 1 replaced with AI polished version
+        self.assertIn("Marcus entered the grand ballroom quietly.", script)
+        self.assertIn("Marcus stepped forward calmly as the entire hall fell dead silent.", script)
+
+        # Now test python_only mode (0 API calls)
+        dummy_client.api_calls = 0
+        ai_service.reset_state()
+        ai_service.workflow_mode = "python_only"
+        ai_service.analyze_story(raw_story)
+        script_py = ai_service.rewrite_story(raw_story)
+        title_py = ai_service.generate_title(script_py)
+        self.assertEqual(dummy_client.api_calls, 0, "Python-only mode must make 0 API calls!")
+        self.assertTrue(len(title_py) > 0)
+        self.assertTrue(len(script_py) > 0)
+
+    def test_single_api_call_per_story(self):
+        """Verify that processing an entire story makes AT MOST 1 Gemini API call (or 0 if clean in Hybrid mode)."""
+        dummy_client = DummyGeminiClient()
+        ai_service = AIService(dummy_client, use_ai_analysis=False, use_ai_qc=False, workflow_mode="full_ai")
         processor = StoryProcessor(ai_service, export_srt=False)
 
         test_dir = "test_sp_input"
@@ -96,7 +171,7 @@ class TestSinglePassTTS(unittest.TestCase):
             self.assertEqual(
                 dummy_client.api_calls,
                 1,
-                f"Expected exactly 1 API call per file, but made {dummy_client.api_calls}",
+                f"Expected 1 API call per file in full_ai mode, but made {dummy_client.api_calls}",
             )
             self.assertEqual(result.title, "She Thought He Was Poor Until The Helicopter Landed")
             self.assertTrue(result.output_filename.endswith(".txt"))
@@ -115,7 +190,7 @@ class TestSinglePassTTS(unittest.TestCase):
                 shutil.rmtree(out_dir)
 
     def test_vietnamese_ui_and_result_editor(self):
-        """Verify Vietnamese UI initialization, pure-Python scan, and Result Editor save flow."""
+        """Verify Vietnamese UI initialization, pure-Python scan, Hybrid Pre-check report, and Result Editor save flow."""
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
         from PySide6.QtWidgets import QApplication
         from app.ui.main_window import MainWindow
@@ -153,8 +228,10 @@ class TestSinglePassTTS(unittest.TestCase):
             # Check natural order in queue
             self.assertEqual(window.batch_processor.files, ["001.srt", "002.srt", "010.srt"])
 
-            # Check Result Editor loaded the output file and can save edits
+            # Check Result Editor loaded the output file and ran Python Pre-Check automatically
             self.assertEqual(window.edit_title_input.text(), "Sample Title")
+            self.assertIn("BÁO CÁO SƠ TUYỂN PYTHON THUẦN (0 TOKEN)", window.precheck_report_box.toPlainText())
+
             window.edit_title_input.setText("Edited Title For TTS")
             window.edit_script_text.setPlainText("First edited sentence. Second edited sentence.")
             window.save_edited_result_to_disk()
@@ -172,3 +249,4 @@ class TestSinglePassTTS(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

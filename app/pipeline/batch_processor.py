@@ -33,6 +33,7 @@ class FileStatus:
     title: Optional[str] = None
     tts_script: Optional[str] = None
     formatted_output: Optional[str] = None
+    precheck_report_text: Optional[str] = None
     error_message: Optional[str] = None
     duration_seconds: float = 0.0
 
@@ -222,6 +223,7 @@ class BatchProcessor:
             status_obj.title = result.title
             status_obj.tts_script = result.tts_script
             status_obj.formatted_output = result.formatted_output
+            status_obj.precheck_report_text = result.precheck_report_text
             status_obj.error_message = result.error_message
             status_obj.duration_seconds = result.duration_seconds
 

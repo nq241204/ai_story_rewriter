@@ -1,4 +1,4 @@
-"""Story processor for AI Story Rewriter."""
+"""Story processor for AI Story Rewriter (Supports Hybrid Python Pre-Check + Targeted LLM)."""
 
 import os
 import shutil
@@ -6,9 +6,10 @@ import time
 from enum import Enum
 from typing import Optional, Callable
 from dataclasses import dataclass
-from app.srt.parser import SRTParser, ParsedSRT
+from app.srt.parser import SRTParser
 from app.srt.writer import SRTWriter
 from app.srt.validator import SRTValidator
+from app.pipeline.pre_checker import PythonPreChecker
 from app.ai.ai_service import AIService
 from app.utils.logger import get_logger
 from app.utils.filenames import generate_output_filename
@@ -44,16 +45,17 @@ class ProcessingResult:
     title: Optional[str] = None
     tts_script: Optional[str] = None
     formatted_output: Optional[str] = None
+    precheck_report_text: Optional[str] = None
     error_message: Optional[str] = None
     duration_seconds: float = 0.0
 
 
 class StoryProcessor:
-    """Processor for individual story files."""
+    """Processor for individual story files using the Hybrid Python+LLM Workflow."""
 
     def __init__(
         self,
-        ai_service: AIService,
+        ai_service: Optional[AIService],
         max_qc_retries: int = 2,
         save_failed: bool = True,
         export_srt: bool = False,
@@ -61,18 +63,6 @@ class StoryProcessor:
         enable_qc: bool = True,
         enable_title: bool = True,
     ):
-        """
-        Initialize story processor.
-
-        Args:
-            ai_service: AIService instance
-            max_qc_retries: Maximum QC correction attempts
-            save_failed: Whether to save failed files
-            export_srt: If True, also export .srt alongside the TTS .txt output
-            enable_analyze: Whether to run analysis step
-            enable_qc: Whether to run QC step
-            enable_title: Whether to run title step
-        """
         self.ai_service = ai_service
         self.max_qc_retries = max_qc_retries
         self.save_failed = save_failed
@@ -84,6 +74,7 @@ class StoryProcessor:
         self.parser = SRTParser()
         self.writer = SRTWriter()
         self.validator = SRTValidator()
+        self.pre_checker = PythonPreChecker()
         self.logger = get_logger()
 
         # Story context (reset between files)
@@ -99,15 +90,11 @@ class StoryProcessor:
         progress_callback: Optional[Callable[[ProcessingState, str], None]] = None
     ) -> ProcessingResult:
         """
-        Process a single SRT file.
-
-        Args:
-            input_path: Path to input SRT file
-            output_dir: Directory for output files
-            progress_callback: Optional callback for progress updates
-
-        Returns:
-            ProcessingResult with outcome
+        Process a single SRT file using the Hybrid Workflow:
+        1. Pure-Python SRT parsing & artifact removal.
+        2. Pure-Python Pre-Check (0 tokens): detects repetitive words, proper noun errors,
+           long sentences, and formatting issues.
+        3. Targeted LLM Polish (or Python-only 0-token output): fixes flagged paragraphs & generates CTR title.
         """
         start_time = time.time()
         filename = os.path.basename(input_path)
@@ -127,33 +114,43 @@ class StoryProcessor:
                 f"SRT parsed in Python ({len(parsed_srt.entries)} blocks, {len(self.original_story.split())} words)"
             )
 
-            # 2. ANALYZE (Pure Python by default - 0 AI tokens)
+            # 2. PURE-PYTHON PRE-CHECK & ANALYSIS (0 TOKENS)
             if progress_callback:
                 progress_callback(ProcessingState.ANALYZING, filename)
 
-            if self.enable_analyze:
-                self.story_analysis = self.ai_service.analyze_story(self.original_story)
+            precheck_report = self.pre_checker.analyze_and_prepare(self.original_story)
+            precheck_report_text = precheck_report.to_vietnamese_summary()
 
-            # 3. REWRITE (Single-pass AI call returns ---TITLE--- and ---TTS_SCRIPT---)
+            if self.enable_analyze and self.ai_service:
+                self.story_analysis = self.ai_service.analyze_story(self.original_story)
+            else:
+                self.story_analysis = precheck_report_text
+
+            # 3. HYBRID REWRITE (Targeted Flagged Paragraphs or Single-Pass)
             if progress_callback:
                 progress_callback(ProcessingState.REWRITING, filename)
 
-            raw_rewritten = self.ai_service.rewrite_story(self.original_story)
+            if self.ai_service:
+                raw_rewritten = self.ai_service.rewrite_story(self.original_story)
+            else:
+                # Fallback if running in pure-Python mode without AIService
+                raw_rewritten = "\n\n".join(precheck_report.paragraphs)
 
             if not raw_rewritten:
                 raise Exception("Failed to rewrite story")
 
-            # Extract title & clean TTS script if markers are present
             extracted_title, cleaned_script = parse_unified_ai_output(raw_rewritten)
             self.rewritten_story = cleaned_script if cleaned_script else raw_rewritten
             if extracted_title:
                 self.title = extracted_title
+            elif hasattr(self.ai_service, "last_title") and getattr(self.ai_service, "last_title", None):
+                self.title = getattr(self.ai_service, "last_title")
 
-            # 4. QUALITY CONTROL (Pure Python by default - only calls AI if issues found)
+            # 4. QUALITY CONTROL (Pure Python by default - 0 extra tokens)
             if progress_callback:
                 progress_callback(ProcessingState.QC, filename)
 
-            if self.enable_qc:
+            if self.enable_qc and self.ai_service:
                 qc_result = self.ai_service.quality_check(
                     self.original_story,
                     self.rewritten_story
@@ -186,13 +183,12 @@ class StoryProcessor:
                     else:
                         self.logger.error("QC still failing after max retries")
 
-            # 5. GENERATE TITLE (Uses cached single-pass title with 0 extra tokens if available)
+            # 5. GENERATE TITLE (Uses cached title with 0 extra tokens if available)
             if progress_callback:
                 progress_callback(ProcessingState.TITLE, filename)
 
-            if self.enable_title:
-                if not self.title:
-                    self.title = self.ai_service.generate_title(self.rewritten_story)
+            if self.enable_title and not self.title and self.ai_service:
+                self.title = self.ai_service.generate_title(self.rewritten_story)
 
             if not self.title:
                 self.logger.warning("Title generation failed, using fallback")
@@ -227,13 +223,11 @@ class StoryProcessor:
 
             os.makedirs(output_dir, exist_ok=True)
 
-            # Save the 2-part TTS output (---TITLE--- & ---TTS_SCRIPT---) as .txt
             output_filename = generate_output_filename(filename, self.title, ext=".txt")
             output_path = os.path.join(output_dir, output_filename)
             self.writer.write_tts_file(self.title, tts_script, output_path)
             self.logger.info(f"TTS script saved to: {output_filename}")
 
-            # Optionally also save .srt if requested
             if self.export_srt and new_entries:
                 srt_filename = generate_output_filename(filename, self.title, ext=".srt")
                 srt_path = os.path.join(output_dir, srt_filename)
@@ -250,6 +244,7 @@ class StoryProcessor:
                 title=self.title,
                 tts_script=tts_script,
                 formatted_output=formatted_output,
+                precheck_report_text=precheck_report_text,
                 duration_seconds=duration
             )
 
@@ -286,5 +281,5 @@ class StoryProcessor:
         self.story_analysis = None
         self.rewritten_story = None
         self.title = None
-        if hasattr(self.ai_service, "reset_state"):
+        if self.ai_service and hasattr(self.ai_service, "reset_state"):
             self.ai_service.reset_state()

@@ -1,4 +1,4 @@
-"""Main window for AI Story Rewriter (Vietnamese Interface)."""
+"""Main window for AI Story Rewriter (Vietnamese Hybrid Workflow Interface)."""
 
 import os
 from datetime import datetime
@@ -16,6 +16,7 @@ from app.storage.settings import SettingsManager
 from app.storage.history import HistoryManager, HistoryEntry
 from app.ai.gemini_client import GeminiClient
 from app.ai.ai_service import AIService
+from app.pipeline.pre_checker import PythonPreChecker
 from app.pipeline.story_processor import StoryProcessor, ProcessingState
 from app.pipeline.batch_processor import BatchProcessor, BatchState, FileStatus
 from app.utils.logger import get_logger
@@ -39,6 +40,18 @@ INTENSITY_KEY_TO_UI = {
     "light": "Nhẹ (Light)",
     "balanced": "Cân bằng (Balanced)",
     "deep": "Sâu & Kịch tính (Deep)",
+}
+
+WORKFLOW_UI_TO_KEY = {
+    "Hybrid Workflow (Python Sơ Tuyển + AI chỉ sửa đoạn gắn cờ — Ít Token Nhất)": "hybrid",
+    "Chỉ Sơ Tuyển Python (0 Token — Xuất báo cáo lỗi để người tự sửa)": "python_only",
+    "AI Viết Lại Toàn Bộ (Full Single-Pass Rewrite)": "full_ai",
+}
+
+WORKFLOW_KEY_TO_UI = {
+    "hybrid": "Hybrid Workflow (Python Sơ Tuyển + AI chỉ sửa đoạn gắn cờ — Ít Token Nhất)",
+    "python_only": "Chỉ Sơ Tuyển Python (0 Token — Xuất báo cáo lỗi để người tự sửa)",
+    "full_ai": "AI Viết Lại Toàn Bộ (Full Single-Pass Rewrite)",
 }
 
 
@@ -77,7 +90,7 @@ class BatchWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    """Main application window with full Vietnamese UI."""
+    """Main application window with full Vietnamese Hybrid Workflow UI."""
 
     def __init__(self):
         super().__init__()
@@ -85,6 +98,7 @@ class MainWindow(QMainWindow):
         self.logger = get_logger()
         self.settings_manager = SettingsManager()
         self.history_manager = HistoryManager()
+        self.pre_checker = PythonPreChecker()
 
         # Initialize components
         self.gemini_client = None
@@ -94,7 +108,7 @@ class MainWindow(QMainWindow):
         self.batch_worker = None
         self._current_preview_status = None
 
-        # Always initialize pure-Python processor so scanning works without API key
+        # Always initialize pure-Python processor so scanning/pre-check works without API key
         self._init_pipeline_components()
 
         self.init_ui()
@@ -103,8 +117,22 @@ class MainWindow(QMainWindow):
         self.refresh_history()
 
     def _init_pipeline_components(self):
-        """Ensure StoryProcessor and BatchProcessor exist for pure-Python scanning."""
+        """Ensure StoryProcessor and BatchProcessor exist for pure-Python scanning & pre-checking."""
         settings = self.settings_manager.get_all()
+        if not self.ai_service:
+            # Create a 0-token AIService if no client yet so Python-only pre-check always works
+            self.ai_service = AIService(
+                client=self.gemini_client,
+                api_timeout=settings.api_timeout,
+                analysis_timeout=settings.analysis_timeout,
+                qc_timeout=settings.qc_timeout,
+                rewrite_intensity=settings.rewrite_intensity,
+                max_retries=settings.max_retry,
+                use_ai_analysis=False,
+                use_ai_qc=settings.use_ai_qc,
+                workflow_mode=settings.workflow_mode,
+            )
+
         if not self.story_processor:
             self.story_processor = StoryProcessor(
                 ai_service=self.ai_service,
@@ -127,8 +155,8 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         """Initialize the user interface in Vietnamese."""
-        self.setWindowTitle("AI Story Rewriter — Công Cụ Viết Lại Truyện & Xuất Kịch Bản TTS")
-        self.setMinimumSize(1260, 820)
+        self.setWindowTitle("AI Story Rewriter — Hybrid Workflow (Python Sơ Tuyển 0 Token + AI Tinh Chỉnh)")
+        self.setMinimumSize(1280, 840)
 
         # Apply styles
         self.setStyleSheet(Styles.get_stylesheet())
@@ -169,7 +197,7 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-size: 18pt; font-weight: bold; line-height: 1.2;")
         layout.addWidget(title)
 
-        subtitle = QLabel("Gemini 2.5 Flash • Siêu Tốc & Tiết Kiệm Token")
+        subtitle = QLabel("Hybrid Workflow • Python 0 Token + LLM")
         subtitle.setProperty("class", "secondary")
         subtitle.setStyleSheet("font-size: 9pt;")
         layout.addWidget(subtitle)
@@ -191,7 +219,7 @@ class MainWindow(QMainWindow):
         self.btn_process.clicked.connect(lambda: self.center_tabs.setCurrentIndex(0))
         nav_buttons.addWidget(self.btn_process)
 
-        self.btn_editor = QPushButton("Xem & Sửa Kết Quả")
+        self.btn_editor = QPushButton("Xem & Sửa Kết Quả (Hybrid)")
         self.btn_editor.clicked.connect(lambda: self.center_tabs.setCurrentIndex(1))
         nav_buttons.addWidget(self.btn_editor)
 
@@ -228,7 +256,7 @@ class MainWindow(QMainWindow):
         # 0: Queue tab
         self.create_queue_tab()
 
-        # 1: Result Viewer & Editor tab (Sửa kết quả)
+        # 1: Result Viewer & Hybrid Editor tab (Sửa kết quả)
         self.create_result_editor_tab()
 
         # 2: History tab
@@ -244,7 +272,7 @@ class MainWindow(QMainWindow):
         """Create queue tab in Vietnamese."""
         queue_widget = QWidget()
         queue_layout = QVBoxLayout(queue_widget)
-        queue_layout.setSpacing(12)
+        queue_layout.setSpacing(10)
 
         # Folder selection
         folder_layout = QHBoxLayout()
@@ -276,7 +304,7 @@ class MainWindow(QMainWindow):
         queue_layout.addLayout(folder_layout)
 
         # Scan button
-        self.btn_scan = QPushButton("Quét Thứ Tự File Tự Nhiên (Python Thuần — Không Tốn Token)")
+        self.btn_scan = QPushButton("Quét Thứ Tự File Tự Nhiên (Python Thuần — 0 Tốn Token)")
         self.btn_scan.setProperty("class", "primary")
         self.btn_scan.clicked.connect(self.scan_files)
         queue_layout.addWidget(self.btn_scan)
@@ -286,14 +314,14 @@ class MainWindow(QMainWindow):
 
         self.queue_list = QTextEdit()
         self.queue_list.setReadOnly(True)
-        self.queue_list.setMaximumHeight(145)
+        self.queue_list.setMaximumHeight(130)
         self.queue_list.setPlaceholderText(
             "Bấm 'Quét Thứ Tự File Tự Nhiên' để tải danh sách file .srt theo đúng thứ tự..."
         )
         queue_layout.addWidget(self.queue_list)
 
         # Progress card
-        queue_layout.addWidget(SectionHeader("TIẾN ĐỘ XỬ LÝ TRUYỆN HIỆN TẠI"))
+        queue_layout.addWidget(SectionHeader("TIẾN ĐỘ XỬ LÝ TRUYỆN HIỆN TẠI (HYBRID WORKFLOW)"))
 
         self.progress_card = ProgressCard()
         queue_layout.addWidget(self.progress_card)
@@ -304,7 +332,7 @@ class MainWindow(QMainWindow):
         self.progress_card.stop_btn.clicked.connect(self.stop_processing)
 
         # Latest result quick preview right inside Queue tab
-        queue_layout.addWidget(SectionHeader("KẾT QUẢ VỪA TẠO (---TITLE--- & ---TTS_SCRIPT---)"))
+        queue_layout.addWidget(SectionHeader("KẾT QUẢ & BÁO CÁO SƠ TUYỂN VỪA TẠO (---TITLE--- & ---TTS_SCRIPT---)"))
         self.quick_result_preview = QTextEdit()
         self.quick_result_preview.setReadOnly(False)
         self.quick_result_preview.setPlaceholderText(
@@ -319,7 +347,7 @@ class MainWindow(QMainWindow):
         self.btn_quick_save.clicked.connect(self.save_quick_preview_edits)
         self.btn_quick_copy_tts = QPushButton("Copy Kịch Bản TTS")
         self.btn_quick_copy_tts.clicked.connect(self.copy_quick_tts_script)
-        self.btn_open_full_editor = QPushButton("Mở Trình Sửa Kết Quả Chi Tiết")
+        self.btn_open_full_editor = QPushButton("Mở Trình Sơ Tuyển & Sửa Kết Quả (Hybrid)")
         self.btn_open_full_editor.clicked.connect(lambda: self.center_tabs.setCurrentIndex(1))
         quick_btn_row.addWidget(self.btn_quick_save)
         quick_btn_row.addWidget(self.btn_quick_copy_tts)
@@ -330,12 +358,14 @@ class MainWindow(QMainWindow):
         self.center_tabs.addTab(queue_widget, "Hàng Đợi & Xử Lý")
 
     def create_result_editor_tab(self):
-        """Create tab for viewing and editing processed results (---TITLE--- & ---TTS_SCRIPT---)."""
+        """Create Hybrid Workflow tab: Python Pre-Check Report + Targeted AI / Human Editor."""
         editor_widget = QWidget()
         editor_layout = QVBoxLayout(editor_widget)
-        editor_layout.setSpacing(12)
+        editor_layout.setSpacing(10)
 
-        editor_layout.addWidget(SectionHeader("XEM & SỬA KẾT QUẢ ĐẦU RA (---TITLE--- / ---TTS_SCRIPT---)"))
+        editor_layout.addWidget(
+            SectionHeader("HYBRID WORKFLOW: BÁO CÁO SƠ TUYỂN PYTHON (0 TOKEN) & CHỈNH SỬA KẾT QUẢ")
+        )
 
         select_row = QHBoxLayout()
         select_row.addWidget(QLabel("Chọn file kết quả:"))
@@ -347,6 +377,18 @@ class MainWindow(QMainWindow):
         self.btn_reload_outputs.clicked.connect(self.load_output_files_into_editor)
         select_row.addWidget(self.btn_reload_outputs)
         editor_layout.addLayout(select_row)
+
+        # Python Pre-Check Report Box (0 Tokens)
+        editor_layout.addWidget(
+            QLabel("BÁO CÁO SƠ TUYỂN PYTHON THUẦN (0 Token — Phát hiện từ lặp, lỗi tên riêng, đoạn quá dài, lỗi định dạng):")
+        )
+        self.precheck_report_box = QTextEdit()
+        self.precheck_report_box.setReadOnly(True)
+        self.precheck_report_box.setMaximumHeight(135)
+        self.precheck_report_box.setPlaceholderText(
+            "Bấm '1. Quét Sơ Tuyển Python (0 Token)' để kiểm tra từ lặp, lỗi tên riêng, câu quá dài và ước tính % tiết kiệm token..."
+        )
+        editor_layout.addWidget(self.precheck_report_box)
 
         # Title editor
         title_row = QHBoxLayout()
@@ -367,10 +409,24 @@ class MainWindow(QMainWindow):
         )
         editor_layout.addWidget(self.edit_script_text, 1)
 
-        action_row = QHBoxLayout()
-        self.btn_format_paragraphs = QPushButton("Chuẩn Hóa 2-3 Câu/Đoạn (Python)")
+        action_row1 = QHBoxLayout()
+        self.btn_run_precheck = QPushButton("1. Quét Sơ Tuyển Python (0 Token)")
+        self.btn_run_precheck.clicked.connect(self.run_python_precheck_on_editor)
+
+        self.btn_hybrid_ai_fix = QPushButton("2. Gọi AI Sửa Riêng Đoạn Gắn Cờ (Hybrid — Ít Token Nhất)")
+        self.btn_hybrid_ai_fix.setProperty("class", "primary")
+        self.btn_hybrid_ai_fix.clicked.connect(self.run_hybrid_ai_on_editor)
+
+        self.btn_format_paragraphs = QPushButton("3. Chuẩn Hóa 2-3 Câu/Đoạn (Python)")
         self.btn_format_paragraphs.clicked.connect(self.format_current_editor_script)
 
+        action_row1.addWidget(self.btn_run_precheck)
+        action_row1.addWidget(self.btn_hybrid_ai_fix)
+        action_row1.addWidget(self.btn_format_paragraphs)
+        action_row1.addStretch()
+        editor_layout.addLayout(action_row1)
+
+        action_row2 = QHBoxLayout()
         self.btn_save_edited_result = QPushButton("Lưu Kết Quả Đã Sửa")
         self.btn_save_edited_result.setProperty("class", "primary")
         self.btn_save_edited_result.clicked.connect(self.save_edited_result_to_disk)
@@ -381,12 +437,11 @@ class MainWindow(QMainWindow):
         self.btn_copy_unified = QPushButton("Copy Toàn Bộ (---TITLE--- + ---TTS_SCRIPT---)")
         self.btn_copy_unified.clicked.connect(self.copy_editor_unified)
 
-        action_row.addWidget(self.btn_format_paragraphs)
-        action_row.addWidget(self.btn_save_edited_result)
-        action_row.addWidget(self.btn_copy_tts_only)
-        action_row.addWidget(self.btn_copy_unified)
-        action_row.addStretch()
-        editor_layout.addLayout(action_row)
+        action_row2.addWidget(self.btn_save_edited_result)
+        action_row2.addWidget(self.btn_copy_tts_only)
+        action_row2.addWidget(self.btn_copy_unified)
+        action_row2.addStretch()
+        editor_layout.addLayout(action_row2)
 
         self.center_tabs.addTab(editor_widget, "Xem & Sửa Kết Quả")
 
@@ -420,23 +475,24 @@ class MainWindow(QMainWindow):
         """Create settings tab in Vietnamese."""
         settings_widget = QWidget()
         settings_layout = QVBoxLayout(settings_widget)
-        settings_layout.setSpacing(16)
+        settings_layout.setSpacing(14)
 
         # AI Settings
-        settings_layout.addWidget(SectionHeader("CẤU HÌNH AI (GOOGLE GEMINI)"))
+        settings_layout.addWidget(SectionHeader("CẤU HÌNH AI & MÔ HÌNH HYBRID WORKFLOW"))
 
         ai_layout = QVBoxLayout()
 
-        # Provider
-        provider_row = QHBoxLayout()
-        provider_row.addWidget(QLabel("Nhà cung cấp:"))
-        provider_row.addWidget(QLabel("Google Gemini (Tối ưu 1 lần gọi — Tiết kiệm 80% Token)"))
-        provider_row.addStretch()
-        ai_layout.addLayout(provider_row)
+        # Workflow mode selector
+        workflow_row = QHBoxLayout()
+        workflow_row.addWidget(QLabel("Chế độ vận hành (Workflow):"))
+        self.workflow_combo = QComboBox()
+        self.workflow_combo.addItems(list(WORKFLOW_UI_TO_KEY.keys()))
+        workflow_row.addWidget(self.workflow_combo, 1)
+        ai_layout.addLayout(workflow_row)
 
         # Model
         model_row = QHBoxLayout()
-        model_row.addWidget(QLabel("Mô hình (Model):"))
+        model_row.addWidget(QLabel("Mô hình AI (Model):"))
         self.model_combo = QComboBox()
         self.model_combo.addItems([
             "gemini-3.5-flash-lite",
@@ -463,7 +519,7 @@ class MainWindow(QMainWindow):
         settings_layout.addLayout(ai_layout)
 
         # Processing Options
-        settings_layout.addWidget(SectionHeader("TÙY CHỌN XỬ LÝ & TIẾT KIỆM TOKEN"))
+        settings_layout.addWidget(SectionHeader("TÙY CHỌN SƠ TUYỂN PYTHON & TIẾT KIỆM TOKEN"))
 
         options_layout = QVBoxLayout()
 
@@ -473,17 +529,19 @@ class MainWindow(QMainWindow):
         self.chk_skip_processed.setChecked(True)
         options_layout.addWidget(self.chk_skip_processed)
 
-        self.chk_analyze = QCheckBox("Phân tích truyện bằng Python thuần (0 tốn token, cực nhanh)")
+        self.chk_analyze = QCheckBox(
+            "Bước 1 — Sơ tuyển (Pre-check) bằng Python thuần (0 Token: Báo cáo từ lặp, tên riêng, đoạn dài, định dạng)"
+        )
         self.chk_analyze.setChecked(True)
         options_layout.addWidget(self.chk_analyze)
 
         self.chk_rewrite = QCheckBox(
-            "Gộp Viết lại truyện + Tạo Title CTR trong 1 lần gọi AI (Xuất ---TITLE--- & ---TTS_SCRIPT---)"
+            "Bước 2 — AI chỉ tập trung sửa các đoạn bị Python gắn cờ + Tạo Title CTR (Xuất ---TITLE--- & ---TTS_SCRIPT---)"
         )
         self.chk_rewrite.setChecked(True)
         options_layout.addWidget(self.chk_rewrite)
 
-        self.chk_qc = QCheckBox("Kiểm duyệt chất lượng (QC) bằng Python thuần (Chỉ gọi AI sửa khi bị lỗi/cắt cụt)")
+        self.chk_qc = QCheckBox("Kiểm duyệt đầu ra (QC) bằng Python thuần (0 Token — Chỉ gọi AI sửa khi bị lỗi/cắt cụt)")
         self.chk_qc.setChecked(True)
         options_layout.addWidget(self.chk_qc)
 
@@ -501,7 +559,7 @@ class MainWindow(QMainWindow):
 
         # Rewrite intensity
         intensity_row = QHBoxLayout()
-        intensity_row.addWidget(QLabel("Mức độ viết lại:"))
+        intensity_row.addWidget(QLabel("Mức độ trau chuốt cảm xúc:"))
         self.intensity_combo = QComboBox()
         self.intensity_combo.addItems([
             "Nhẹ (Light)",
@@ -580,7 +638,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.status_label)
 
     def init_ai(self):
-        """Initialize AI components while keeping pure-Python pipeline always available."""
+        """Initialize AI components while keeping pure-Python Hybrid pre-checker always available."""
         settings = self.settings_manager.get_all()
         api_key = settings.api_key or self.api_key_edit.text().strip()
 
@@ -590,23 +648,28 @@ class MainWindow(QMainWindow):
                     api_key=api_key,
                     model_name=settings.model_name
                 )
-                self.ai_service = AIService(
-                    self.gemini_client,
-                    api_timeout=settings.api_timeout,
-                    analysis_timeout=settings.analysis_timeout,
-                    qc_timeout=settings.qc_timeout,
-                    rewrite_intensity=settings.rewrite_intensity,
-                    max_retries=settings.max_retry,
-                    use_ai_analysis=False,
-                    use_ai_qc=settings.use_ai_qc,
+                self.status_label.setText(
+                    f"Hybrid Workflow: Sẵn sàng ({settings.model_name} • Mode: {settings.workflow_mode.upper()})"
                 )
-                self.status_label.setText(f"Gemini: Đã sẵn sàng ({settings.model_name})")
             except Exception as e:
                 self.logger.error(f"Failed to init Gemini client: {e}")
-                self.status_label.setText("Gemini: Lỗi khởi tạo kết nối")
+                self.gemini_client = None
+                self.status_label.setText("Gemini: Lỗi khởi tạo kết nối (Sơ tuyển Python vẫn hoạt động)")
         else:
-            self.status_label.setText("Gemini: Chưa nhập API Key (Chế độ quét Python thuần sẵn sàng)")
+            self.gemini_client = None
+            self.status_label.setText("Chế độ Sơ tuyển Python thuần (0 Token) sẵn sàng")
 
+        self.ai_service = AIService(
+            self.gemini_client,
+            api_timeout=settings.api_timeout,
+            analysis_timeout=settings.analysis_timeout,
+            qc_timeout=settings.qc_timeout,
+            rewrite_intensity=settings.rewrite_intensity,
+            max_retries=settings.max_retry,
+            use_ai_analysis=False,
+            use_ai_qc=settings.use_ai_qc,
+            workflow_mode=settings.workflow_mode,
+        )
         self._init_pipeline_components()
 
     def load_settings(self):
@@ -617,6 +680,13 @@ class MainWindow(QMainWindow):
         self.model_combo.setCurrentText(settings.model_name)
         self.input_path_edit.setText(settings.input_folder)
         self.output_path_edit.setText(settings.output_folder)
+
+        ui_workflow = WORKFLOW_KEY_TO_UI.get(
+            settings.workflow_mode.lower(),
+            WORKFLOW_KEY_TO_UI["hybrid"]
+        )
+        self.workflow_combo.setCurrentText(ui_workflow)
+
         ui_intensity = INTENSITY_KEY_TO_UI.get(
             settings.rewrite_intensity.lower(),
             "Cân bằng (Balanced)"
@@ -635,11 +705,16 @@ class MainWindow(QMainWindow):
             self.intensity_combo.currentText(),
             "balanced"
         )
+        workflow_key = WORKFLOW_UI_TO_KEY.get(
+            self.workflow_combo.currentText(),
+            "hybrid"
+        )
         self.settings_manager.update(
             api_key=self.api_key_edit.text().strip(),
             model_name=self.model_combo.currentText(),
             input_folder=self.input_path_edit.text().strip(),
             output_folder=self.output_path_edit.text().strip(),
+            workflow_mode=workflow_key,
             rewrite_intensity=intensity_key,
             max_retry=int(self.retry_edit.text()) if self.retry_edit.text().isdigit() else 3,
             api_timeout=int(self.api_timeout_edit.text()) if self.api_timeout_edit.text().isdigit() else 60,
@@ -656,7 +731,7 @@ class MainWindow(QMainWindow):
             self.story_processor.enable_title = self.chk_title.isChecked()
             self.story_processor.export_srt = self.chk_export.isChecked()
 
-        self.log_message("Đã lưu cài đặt hệ thống")
+        self.log_message(f"Đã lưu cài đặt hệ thống (Chế độ: {workflow_key.upper()})")
 
     def select_input_folder(self):
         """Select input folder."""
@@ -729,11 +804,14 @@ class MainWindow(QMainWindow):
 
     def start_processing(self):
         """Start or resume batch processing."""
-        if not self.ai_service:
-            self.save_settings()
+        self.save_settings()
+        settings = self.settings_manager.get_all()
 
-        if not self.ai_service:
-            self.log_message("Vui lòng nhập Gemini API Key trong tab Cài Đặt trước khi chạy AI")
+        # Require API key only if workflow_mode is not python_only
+        if settings.workflow_mode != "python_only" and not self.gemini_client:
+            self.log_message(
+                "Vui lòng nhập Gemini API Key trong tab Cài Đặt (hoặc chọn chế độ 'Chỉ Sơ Tuyển Python 0 Token')"
+            )
             self.center_tabs.setCurrentIndex(3)
             return
 
@@ -758,7 +836,7 @@ class MainWindow(QMainWindow):
         self.btn_scan.setEnabled(False)
 
         self.batch_worker.start()
-        self.log_message("Bắt đầu xử lý hàng loạt (Chế độ 1 lần gọi Gemini 2.5 Flash)")
+        self.log_message(f"Bắt đầu xử lý hàng loạt (Chế độ: {settings.workflow_mode.upper()})")
 
     def pause_processing(self):
         """Pause processing."""
@@ -781,10 +859,12 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Tiến độ: {current}/{total} — {stage_vi}")
 
     def on_file_completed(self, status_obj: FileStatus):
-        """Handle individual file completion: show result immediately & record history."""
+        """Handle individual file completion: show result + Pre-Check report immediately."""
         if status_obj.status == ProcessingState.COMPLETED and status_obj.formatted_output:
             self._current_preview_status = status_obj
             self.quick_result_preview.setPlainText(status_obj.formatted_output)
+            if status_obj.precheck_report_text:
+                self.precheck_report_box.setPlainText(status_obj.precheck_report_text)
             self.load_output_files_into_editor(select_path=status_obj.output_path)
 
         if status_obj.status in (ProcessingState.COMPLETED, ProcessingState.FAILED):
@@ -823,8 +903,57 @@ class MainWindow(QMainWindow):
             self.log_message("Đã hoàn thành xử lý toàn bộ hàng đợi!")
 
     # ============================================================
-    # RESULT VIEWER & EDITOR ("SỬA KẾT QUẢ")
+    # HYBRID RESULT VIEWER & EDITOR ("SƠ TUYỂN PYTHON & SỬA KẾT QUẢ")
     # ============================================================
+
+    def run_python_precheck_on_editor(self):
+        """Run 0-token pure-Python Pre-Check on the current text in the editor."""
+        raw_script = self.edit_script_text.toPlainText().strip()
+        if not raw_script:
+            self.log_message("Chưa có nội dung trong khung kịch bản để chạy Sơ tuyển Python")
+            return
+
+        report = self.pre_checker.analyze_and_prepare(raw_script)
+        self.precheck_report_box.setPlainText(report.to_vietnamese_summary())
+        self.edit_script_text.setPlainText("\n\n".join(report.paragraphs))
+        self.log_message(
+            f"Sơ tuyển Python (0 Token): {len(report.clean_indices)} đoạn sạch, "
+            f"{len(report.flagged_indices)} đoạn gắn cờ (Tiết kiệm ~{report.token_savings_estimate_pct}% token)"
+        )
+
+    def run_hybrid_ai_on_editor(self):
+        """Use Hybrid AI mode to polish ONLY the paragraphs flagged by Python in the editor."""
+        raw_script = self.edit_script_text.toPlainText().strip()
+        if not raw_script:
+            self.log_message("Chưa có nội dung kịch bản để tinh chỉnh")
+            return
+
+        if not self.gemini_client:
+            self.save_settings()
+        if not self.gemini_client:
+            self.log_message("Vui lòng nhập Gemini API Key trong tab Cài Đặt trước khi gọi AI")
+            return
+
+        report = self.pre_checker.analyze_and_prepare(raw_script)
+        self.precheck_report_box.setPlainText(report.to_vietnamese_summary())
+
+        if not report.flagged_indices:
+            self.log_message(
+                "Tất cả các đoạn đã đạt chuẩn (0 đoạn bị gắn cờ) — không cần tốn token gọi AI sửa lại!"
+            )
+            return
+
+        self.log_message(
+            f"Đang gửi riêng {len(report.flagged_indices)}/{len(report.paragraphs)} đoạn gắn cờ lên AI..."
+        )
+        polished_script = self.ai_service.rewrite_flagged_paragraphs_only(report)
+        if polished_script:
+            self.edit_script_text.setPlainText(polished_script)
+            if self.ai_service.last_title and not self.edit_title_input.text().strip():
+                self.edit_title_input.setText(self.ai_service.last_title)
+            self.log_message(
+                f"Đã sửa xong {len(report.flagged_indices)} đoạn gắn cờ bằng AI (Tiết kiệm ~{report.token_savings_estimate_pct}% token)"
+            )
 
     def load_output_files_into_editor(self, select_path: str = None):
         """Scan output folder in pure Python and populate the Result Editor dropdown."""
@@ -857,7 +986,7 @@ class MainWindow(QMainWindow):
             self.on_result_file_selected(self.result_file_combo.currentIndex())
 
     def on_result_file_selected(self, index: int):
-        """Load selected output file into the Title and TTS Script editor fields."""
+        """Load selected output file into the Title, TTS Script, and Python Pre-Check Report fields."""
         if index < 0:
             return
         filepath = self.result_file_combo.itemData(index)
@@ -868,8 +997,13 @@ class MainWindow(QMainWindow):
             with open(filepath, 'r', encoding='utf-8-sig') as f:
                 raw_content = f.read()
             title, tts_script = parse_unified_ai_output(raw_content)
+            script_text = tts_script or raw_content
             self.edit_title_input.setText(title or "")
-            self.edit_script_text.setPlainText(tts_script or raw_content)
+            self.edit_script_text.setPlainText(script_text)
+
+            # Automatically run 0-token Python Pre-Check report on the loaded script
+            report = self.pre_checker.analyze_and_prepare(script_text)
+            self.precheck_report_box.setPlainText(report.to_vietnamese_summary())
         except Exception as e:
             self.log_message(f"Không thể đọc file kết quả: {e}")
 
@@ -878,6 +1012,8 @@ class MainWindow(QMainWindow):
         raw_script = self.edit_script_text.toPlainText()
         formatted = format_tts_paragraphs(raw_script, sentences_per_paragraph=3)
         self.edit_script_text.setPlainText(formatted)
+        report = self.pre_checker.analyze_and_prepare(formatted)
+        self.precheck_report_box.setPlainText(report.to_vietnamese_summary())
         self.log_message("Đã chuẩn hóa kịch bản thành đoạn ngắn 2-3 câu/đoạn cho TTS")
 
     def save_edited_result_to_disk(self):
