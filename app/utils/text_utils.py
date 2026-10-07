@@ -18,9 +18,30 @@ TITLE_MARKER_REGEX = re.compile(
     re.IGNORECASE
 )
 SCRIPT_MARKER_REGEX = re.compile(
-    r'(?:^|\n)\s*[*#`-]*\s*---\s*TTS_SCRIPT\s*---\s*[*#`]*\s*:?\s*',
+    r'(?:^|\n)\s*[*#`-]*\s*---\s*(?:TTS_SCRIPT|FIXED_PARAGRAPHS)\s*---\s*[*#`]*\s*:?\s*',
     re.IGNORECASE
 )
+SPOKEN_FILLER_PATTERN = re.compile(
+    r'\b(?:uh+|um+|erm+|ah+|hmm+)\b[,\s]*',
+    re.IGNORECASE
+)
+MARKDOWN_EMPHASIS_PATTERN = re.compile(r'\*{1,3}([^*]+)\*{1,3}|_{1,2}([^_]+)_{1,2}')
+
+# Pure-Python replacements for common AI-sounding phrases -> natural human storytelling
+AI_CLICHE_REPLACEMENTS: List[Tuple[re.Pattern, str]] = [
+    (re.compile(r'\b(?:Furthermore|Moreover|In addition|Consequently|Thus|Hence),\s+', re.IGNORECASE), ''),
+    (re.compile(r'\bNeedless to say,\s+', re.IGNORECASE), ''),
+    (re.compile(r'\bIt is worth noting that\s+', re.IGNORECASE), ''),
+    (re.compile(r'\ba testament to\b', re.IGNORECASE), 'proof of'),
+    (re.compile(r'\ba whirlwind of emotions\b', re.IGNORECASE), 'a wave of shock'),
+    (re.compile(r'\bpalpable tension\b', re.IGNORECASE), 'heavy silence'),
+    (re.compile(r'\bthe tension was palpable\b', re.IGNORECASE), 'the room went dead silent'),
+    (re.compile(r'\blet out a breath (?:he|she|they|I) didn\'t know (?:he|she|they|I) (?:was|were) holding\b', re.IGNORECASE), 'exhaled slowly'),
+    (re.compile(r'\bsent (?:a shiver|shivers) down (his|her|my|their) spine\b', re.IGNORECASE), r'made \1 freeze'),
+    (re.compile(r'\ba tapestry of\b', re.IGNORECASE), 'a mix of'),
+    (re.compile(r'\ba symphony of\b', re.IGNORECASE), 'the sound of'),
+    (re.compile(r'\bbeacon of hope\b', re.IGNORECASE), 'last hope'),
+]
 
 
 def normalize_line_endings(text: str) -> str:
@@ -75,6 +96,26 @@ def clean_whitespace(text: str) -> str:
     return '\n'.join(lines)
 
 
+def clean_ai_cliches_python(text: str) -> str:
+    """
+    Pure-Python sanitizer (0 tokens) that strips markdown emphasis and replaces
+    common robotic/AI-tell phrases with natural human storytelling phrasing.
+    """
+    if not text:
+        return ""
+    # Remove markdown bold/italics (**text** or *text*)
+    text = MARKDOWN_EMPHASIS_PATTERN.sub(lambda m: m.group(1) or m.group(2) or "", text)
+    for pattern, replacement in AI_CLICHE_REPLACEMENTS:
+        text = pattern.sub(replacement, text)
+    # Ensure sentence starts after period are capitalized if a connector was stripped
+    text = re.sub(
+        r'(^|[.!?]\s+)([a-z])',
+        lambda m: m.group(1) + m.group(2).upper(),
+        text
+    )
+    return text
+
+
 def strip_srt_artifacts(text: str) -> str:
     """
     Pure-Python removal of all SRT numbers, timecodes, HTML tags, and caption noise.
@@ -93,8 +134,9 @@ def strip_srt_artifacts(text: str) -> str:
 
 def compress_story_for_ai(lines: List[str]) -> str:
     """
-    Deduplicate consecutive rolling subtitle lines and compress whitespace in pure Python.
-    Minimizes input tokens sent to Gemini API without losing any story content.
+    Deduplicate consecutive rolling subtitle lines, strip spoken filler noises,
+    and compress whitespace in pure Python.
+    Minimizes input tokens sent to Gemini API without losing any story plot.
     """
     deduped: List[str] = []
     prev_norm = ""
@@ -102,6 +144,7 @@ def compress_story_for_ai(lines: List[str]) -> str:
     for raw_line in lines:
         cleaned = HTML_TAG_PATTERN.sub('', raw_line)
         cleaned = NOISE_BRACKET_PATTERN.sub('', cleaned)
+        cleaned = SPOKEN_FILLER_PATTERN.sub('', cleaned)
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         if not cleaned:
             continue
@@ -120,12 +163,20 @@ def compress_story_for_ai(lines: List[str]) -> str:
     return ' '.join(deduped)
 
 
-def format_tts_paragraphs(text: str, sentences_per_paragraph: int = 3) -> str:
+def format_tts_paragraphs(
+    text: str,
+    sentences_per_paragraph: int = 3,
+    clean_cliches: bool = False,
+) -> str:
     """
     Format story text into short paragraphs (2-3 sentences per paragraph)
-    optimized for Text-to-Speech (TTS) natural reading, with zero timecodes or index numbers.
+    optimized for Text-to-Speech (TTS) natural reading, with zero timecodes
+    and zero markdown emphasis.
     """
     cleaned = strip_srt_artifacts(text)
+    cleaned = MARKDOWN_EMPHASIS_PATTERN.sub(lambda m: m.group(1) or m.group(2) or "", cleaned)
+    if clean_cliches:
+        cleaned = clean_ai_cliches_python(cleaned)
     if not cleaned:
         return ""
 

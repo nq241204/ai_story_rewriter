@@ -27,17 +27,17 @@ class AIService:
         max_retries: int = 3,
         use_ai_analysis: bool = False,
         use_ai_qc: bool = False,
-        workflow_mode: str = "hybrid",  # "hybrid", "python_only", "full_ai"
+        workflow_mode: str = "full_ai",  # "full_ai", "hybrid", "python_only"
     ):
         """
         Initialize AI service.
 
         workflow_mode:
+          - "full_ai": 1-Pass Full Story Rewrite from Plot Skeleton + 0-Token Python Pre/Post-Check (Default).
           - "hybrid": Pure-Python Pre-Check flags specific paragraphs -> LLM only rewrites
                       flagged paragraphs + generates CTR Title (saves 70-95% tokens).
           - "python_only": 0 Tokens! Pure-Python Pre-Check & TTS formatting only,
                            outputs Pre-Check report for human editing.
-          - "full_ai": Single-pass full story rewrite + CTR title guided by Python pre-check notes.
         """
         self.client = client
         self.prompts = Prompts()
@@ -50,7 +50,7 @@ class AIService:
         self.max_retries = max_retries
         self.use_ai_analysis = use_ai_analysis
         self.use_ai_qc = use_ai_qc
-        self.workflow_mode = (workflow_mode or "hybrid").lower()
+        self.workflow_mode = (workflow_mode or "full_ai").lower()
 
         # Cached outputs for the current file
         self.last_title: Optional[str] = None
@@ -301,24 +301,27 @@ class AIService:
         ):
             return self.rewrite_flagged_paragraphs_only(report)
 
-        # Mode 3: Full Single-Pass Rewrite guided by Python Pre-Check findings
+        # Mode 3: Full Single-Pass Story Rewrite from Plot Skeleton (guided by Python Pre-Check)
         self.logger.info("Starting single-pass story rewrite + CTR title generation (guided by Python Pre-Check)")
         clean_input = "\n\n".join(report.paragraphs)
         if not clean_input:
             return None
 
-        precheck_notes = ""
-        if report.flagged_indices or report.proper_noun_variants:
-            notes = []
-            if report.detected_characters:
-                notes.append(f"Keep character names consistent: {', '.join(report.detected_characters)}.")
-            if report.flagged_indices:
-                flagged_summary = "; ".join(
-                    f"P#{i+1} ({', '.join(report.paragraph_issues[i].flags)})"
-                    for i in report.flagged_indices[:5]
-                )
-                notes.append(f"Python Pre-Check flagged these issues to fix: {flagged_summary}.")
-            precheck_notes = "\n" + " ".join(notes) + "\n"
+        # Fix any character name typos in the source skeleton in pure Python (0 tokens)
+        clean_input = self.pre_checker.normalize_proper_nouns_in_text(clean_input, report)
+
+        notes = [
+            f"Target story length: maintain or enrich depth (~{max(report.total_words, 120)} words, never summarize)."
+        ]
+        if report.detected_characters:
+            notes.append(f"Main characters (keep names 100% consistent): {', '.join(report.detected_characters)}.")
+        if report.flagged_indices:
+            flagged_summary = "; ".join(
+                f"P#{i+1} ({', '.join(report.paragraph_issues[i].flags)})"
+                for i in report.flagged_indices[:5]
+            )
+            notes.append(f"Fix these source weaknesses during rewrite: {flagged_summary}.")
+        precheck_notes = "\n" + " ".join(notes) + "\n"
 
         intensity_hint = self.prompts.INTENSITY_HINTS.get(
             self.rewrite_intensity,
@@ -344,7 +347,9 @@ class AIService:
 
         title, tts_script = parse_unified_ai_output(raw_output)
         if not tts_script:
-            tts_script = format_tts_paragraphs(raw_output, sentences_per_paragraph=3)
+            tts_script = format_tts_paragraphs(raw_output, sentences_per_paragraph=3, clean_cliches=True)
+        else:
+            tts_script = format_tts_paragraphs(tts_script, sentences_per_paragraph=3, clean_cliches=True)
 
         self.last_title = title
         self.last_tts_script = tts_script
@@ -352,6 +357,8 @@ class AIService:
             self.last_title or "Story",
             self.last_tts_script
         )
+        # Update Pre-Check report on the newly rewritten story (0 tokens)
+        self.last_precheck_report = self.pre_checker.analyze_and_prepare(self.last_tts_script)
 
         self.logger.info(
             f"Single-pass rewrite completed (Title: {(self.last_title or 'Pending')[:45]})"

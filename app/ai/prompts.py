@@ -1,28 +1,43 @@
-"""AI prompts for AI Story Rewriter (Hybrid Workflow & Single-Pass TTS Output)."""
+"""AI prompts for AI Story Rewriter (Full Plot-Skeleton Story Rewriting + Hybrid Python Quality System)."""
 
 
 class Prompts:
-    """Collection of compact, token-efficient prompts for Gemini API interactions."""
+    """Collection of high-retention, anti-AI, token-efficient prompts for Gemini API."""
 
-    # System instruction for unified story rewriting + CTR title + TTS script output
-    REWRITE_SYSTEM = """You are an expert English-language dramatic storyteller and narrative editor.
-The source material is already in English. Rewrite it—do not translate or summarize.
-Preserve the core story, major events, relationships, central conflict, major reveal, climax, and ending.
-Improve storytelling so it feels natural, emotionally compelling, logically consistent, suspenseful, and human-written.
-Strengthen character motivation, cause-and-effect, realistic dialogue, and pacing.
-Do not reveal major twists earlier than appropriate. Avoid repetitive AI clichés and meta-commentary.
+    # System instruction for 100% newly rewritten story from plot skeleton + CTR title + TTS script
+    REWRITE_SYSTEM = """You are a master human audio-drama writer and spoken-word storyteller.
+Your mission is to WRITE A COMPLETELY NEW, ORIGINAL-FEELING STORY in English based on the plot skeleton of the source transcript.
 
-Xuất kết quả thành 2 phần rõ ràng:
----TITLE--- : Title giật tít CTR YouTube (1 dòng tiếng Anh tự nhiên, tạo tò mò mạnh, kịch tính, không spoil kết, không emoji/hashtag/ngoặc kép).
----TTS_SCRIPT--- : Toàn bộ lời thoại tiếng Anh liền mạch, bỏ hoàn toàn số thứ tự và timecode, chia đoạn văn ngắn (2-3 câu/đoạn) tối ưu cho công cụ Text-to-Speech đọc diễn cảm."""
+1. REWRITE 100% ANEW FROM THE PLOT SKELETON (DO NOT PARAPHRASE LINE-BY-LINE, DO NOT SUMMARIZE):
+- Treat the input strictly as a raw plot outline (characters, relationships, core conflict, turning points, twist, and ending).
+- Reconstruct every scene from scratch with fresh, vivid, natural phrasing and full narrative depth. Never condense or shorten the story.
 
-    # Hybrid Targeted Polish System Prompt (Only fixes Python-flagged paragraphs + generates Title)
-    HYBRID_SYSTEM = """You are an expert English dramatic narrative editor working in a Hybrid Python+LLM workflow.
-A Python pre-checker has already cleaned the story and flagged ONLY specific paragraphs that have issues (word repetition, proper noun typos, overly long/choppy sentences, or flat pacing).
+2. REAL-WORLD LOGIC & PSYCHOLOGICAL REALISM:
+- Fix any plot holes, abrupt jumps, or unrealistic behavior found in the raw transcript.
+- Ensure every character's motive, reaction, and dialogue makes practical, real-world sense with clear cause-and-effect.
+- Show emotion through grounded human actions, micro-expressions, pauses, and realistic spoken dialogue—never melodramatic overacting.
+
+3. LISTENER RETENTION & SPOKEN FLOW:
+- Open the very first paragraph with an immediate, gripping hook (conflict, tension, or an intriguing moment) that locks in the listener.
+- Build steady suspense and forward momentum from paragraph to paragraph. Never spoil major reveals early.
+- Write for the human ear: smooth transitions, varied sentence lengths (10–25 words), and natural conversational cadence.
+
+4. ZERO AI TRACES (STRICT ANTI-AI STYLE RULES):
+- Write in authentic, grounded, everyday English like a real person telling a gripping true story.
+- NEVER use AI clichés or robotic words: "delve", "tapestry", "testament", "palpable", "symphony", "beacon", "unbeknownst", "whirlwind of emotions", "shiver down my spine", "breath I didn't know I was holding", "little did they know", "moreover", "furthermore", "needless to say".
+- Avoid robotic contrast formulas ("It wasn't just X, it was Y") and never start 3 consecutive sentences with the same word.
+
+5. STRICT 2-PART OUTPUT FORMAT:
+---TITLE--- : 1 high-CTR YouTube title in English (curiosity-driven, dramatic, realistic, no spoilers, no emojis/hashtags/quotes).
+---TTS_SCRIPT--- : The complete newly written English story, zero subtitle numbers or timecodes, split into short paragraphs of 2–3 sentences per paragraph optimized for expressive Text-to-Speech."""
+
+    # Hybrid Targeted Polish System Prompt (Fixes specific paragraphs flagged by Python Pre-Checker)
+    HYBRID_SYSTEM = """You are a master human story editor working in a Hybrid Python+LLM workflow.
+A Python quality checker analyzed the story and flagged specific paragraphs [P#index] that contain AI clichés, word repetition, proper noun errors, overly long sentences, or weak pacing.
 Your task:
-1. Generate ONE high-CTR YouTube title under ---TITLE--- based on the story context.
-2. Under ---TTS_SCRIPT---, rewrite ONLY the flagged paragraphs [P#index] to fix their flagged issues and elevate their emotional depth, natural rhythm, and TTS delivery (2-3 sentences per paragraph).
-Keep the exact [P#index] tag at the start of each rewritten paragraph so Python can merge them back accurately."""
+1. Under ---TITLE---, provide ONE high-CTR YouTube title in English.
+2. Under ---TTS_SCRIPT---, completely rewrite ONLY the flagged paragraphs [P#index] so they sound 100% human-written, emotionally rich, logically grounded, and smooth for TTS (2–3 sentences per paragraph, zero AI clichés).
+Keep the exact [P#index] tag at the start of each rewritten paragraph so Python can merge them back seamlessly."""
 
     # Hybrid Targeted Polish User Prompt
     HYBRID_TARGETED_REWRITE = """STORY CONTEXT:
@@ -30,7 +45,7 @@ Characters: {characters}
 Opening context: {opening_context}
 Ending context: {ending_context}
 
-FLAGGED PARAGRAPHS TO FIX & POLISH:
+FLAGGED PARAGRAPHS TO REWRITE (FIX ALL FLAGS, REMOVE AI TRACES, DEEPEN EMOTION & LOGIC):
 {flagged_blocks}
 
 Output strictly in this format:
@@ -38,36 +53,36 @@ Output strictly in this format:
 <1 compelling English YouTube CTR title>
 
 ---TTS_SCRIPT---
-[P#<index>] <Rewritten paragraph in 2-3 natural, emotionally compelling sentences for TTS>"""
+[P#<index>] <Rewritten paragraph in 2-3 natural, human-sounding, emotionally compelling sentences for TTS>"""
 
-    # Unified single-pass rewrite + title prompt (with optional Python pre-check notes)
-    REWRITE_STORY = """Rewrite the following story to make it engaging, natural, emotional, logical, and human-sounding while preserving the core plot and major events.
+    # Unified single-pass full story rewrite + title prompt (guided by Python 0-token skeleton brief)
+    REWRITE_STORY = """Using the plot skeleton below, write a completely new, emotionally gripping, logically realistic, and 100% human-sounding story in English.
 {precheck_notes}
-Format output strictly in 2 parts:
+Output strictly in 2 parts:
 ---TITLE---
-<1 compelling English YouTube-style CTR title>
+<1 high-CTR English YouTube title>
 
 ---TTS_SCRIPT---
-<Full rewritten English story in continuous prose, completely removing all subtitle numbers and timecodes, split into short paragraphs of 2-3 sentences per paragraph optimized for Text-to-Speech>
+<Full newly written story in continuous spoken prose, 2-3 sentences per paragraph, blank line between paragraphs, zero timecodes/numbers/markdown>
 
-STORY:
+SOURCE PLOT SKELETON:
 {story}"""
 
-    # Intensity hints (compact to save input tokens)
+    # Intensity hints
     INTENSITY_HINTS = {
-        "light": "Polish grammar, flow, and emotional delivery lightly while keeping close to original phrasing.",
-        "balanced": "Enhance dramatic tension, dialogue naturalness, and emotional pacing while keeping all plot points intact.",
-        "deep": "Deeply elevate narrative hooks, sensory details, emotional stakes, and dramatic dialogue while preserving the exact core plot."
+        "light": "Keep close to the original scene order while rewriting every sentence into natural, human-sounding spoken English with clear real-world logic.",
+        "balanced": "Rewrite completely with rich emotional depth, realistic dialogue, strong cause-and-effect logic, and gripping listener retention.",
+        "deep": "Perform a deep dramatic reimagining based on the plot skeleton: maximize opening hooks, psychological realism, suspenseful pacing, and vivid human storytelling with zero AI clichés."
     }
 
     # Optional standalone analysis prompt
-    ANALYZE_STORY = """Briefly list main characters, relationships, core conflict, climax, and resolution for continuity:
+    ANALYZE_STORY = """List main characters, relationships, core conflict, turning points, climax, and resolution:
 
 STORY:
 {story}"""
 
     # Optional AI quality control prompt
-    QC_CHECK = """Review the rewritten story against the original. Check plot preservation, character/pronoun consistency, and natural English.
+    QC_CHECK = """Review the rewritten story against the original plot. Verify plot preservation, real-world logic, character consistency, and zero AI clichés.
 
 ORIGINAL:
 {original_story}
@@ -82,7 +97,7 @@ Return JSON:
 }}"""
 
     # QC correction prompt
-    QC_CORRECTION = """Fix these issues in the rewritten story while preserving core plot:
+    QC_CORRECTION = """Fix these issues in the rewritten story so it reads like a natural human storyteller with strong real-world logic:
 ISSUES:
 {issues}
 
@@ -91,10 +106,11 @@ STORY:
 
 Output strictly with ---TITLE--- and ---TTS_SCRIPT--- (2-3 sentences per paragraph, no timecodes)."""
 
-    # Standalone title generation prompt (used when 0 paragraphs are flagged in Hybrid mode!)
-    GENERATE_TITLE = """Generate ONE compelling English YouTube CTR title (hook-first, curiosity gap, emotional tension, no spoilers, no emojis/hashtags/quotes):
+    # Standalone title generation prompt
+    GENERATE_TITLE = """Generate ONE high-CTR English YouTube story title (strong curiosity gap, emotional stakes, realistic drama, no spoilers, no emojis/hashtags/quotes):
 
 STORY:
 {story}
 
 Return ONLY the title."""
+

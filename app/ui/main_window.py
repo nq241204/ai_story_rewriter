@@ -43,15 +43,15 @@ INTENSITY_KEY_TO_UI = {
 }
 
 WORKFLOW_UI_TO_KEY = {
-    "Hybrid Workflow (Python Sơ Tuyển + AI chỉ sửa đoạn gắn cờ — Ít Token Nhất)": "hybrid",
+    "Viết Lại Toàn Bộ Truyện Mới Từ Khung Sườn + Sơ Tuyển Python 0 Token (Khuyên dùng)": "full_ai",
+    "Hybrid Tinh Chỉnh Đoạn Lỗi (Python Quét 0 Token + AI Chỉ Sửa Đoạn Gắn Cờ)": "hybrid",
     "Chỉ Sơ Tuyển Python (0 Token — Xuất báo cáo lỗi để người tự sửa)": "python_only",
-    "AI Viết Lại Toàn Bộ (Full Single-Pass Rewrite)": "full_ai",
 }
 
 WORKFLOW_KEY_TO_UI = {
-    "hybrid": "Hybrid Workflow (Python Sơ Tuyển + AI chỉ sửa đoạn gắn cờ — Ít Token Nhất)",
+    "full_ai": "Viết Lại Toàn Bộ Truyện Mới Từ Khung Sườn + Sơ Tuyển Python 0 Token (Khuyên dùng)",
+    "hybrid": "Hybrid Tinh Chỉnh Đoạn Lỗi (Python Quét 0 Token + AI Chỉ Sửa Đoạn Gắn Cờ)",
     "python_only": "Chỉ Sơ Tuyển Python (0 Token — Xuất báo cáo lỗi để người tự sửa)",
-    "full_ai": "AI Viết Lại Toàn Bộ (Full Single-Pass Rewrite)",
 }
 
 

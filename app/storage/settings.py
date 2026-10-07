@@ -13,7 +13,7 @@ class AppSettings:
     model_name: str = "gemini-3.5-flash-lite"
     input_folder: str = ""
     output_folder: str = ""
-    workflow_mode: str = "hybrid"  # "hybrid", "python_only", "full_ai"
+    workflow_mode: str = "full_ai"  # "full_ai", "hybrid", "python_only"
     rewrite_intensity: str = "balanced"  # light, balanced, deep
     max_retry: int = 3
     save_failed: bool = True

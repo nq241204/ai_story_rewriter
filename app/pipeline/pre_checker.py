@@ -87,6 +87,20 @@ NON_NAME_CAPITALIZED: Set[str] = {
     "Everything", "Nothing", "Anything", "Something", "Somewhere", "Nowhere"
 }
 
+# Patterns that betray AI-generated writing ("dấu vết AI viết")
+AI_TRACE_PATTERNS: List[Tuple[re.Pattern, str]] = [
+    (re.compile(r'\b(delve|delved|delving)\b', re.IGNORECASE), "delve"),
+    (re.compile(r'\b(tapestry|kaleidoscope|symphony)\b', re.IGNORECASE), "tapestry/symphony"),
+    (re.compile(r'\b(palpable|unbeknownst)\b', re.IGNORECASE), "palpable/unbeknownst"),
+    (re.compile(r'\btestament to\b', re.IGNORECASE), "testament to"),
+    (re.compile(r'\bbeacon of\b', re.IGNORECASE), "beacon of"),
+    (re.compile(r'\bwhirlwind of\b', re.IGNORECASE), "whirlwind of"),
+    (re.compile(r'\bshivers? down\b', re.IGNORECASE), "shiver down spine"),
+    (re.compile(r'\bbreath (?:he|she|they|I) didn\'t know\b', re.IGNORECASE), "breath didn't know holding"),
+    (re.compile(r'\blittle did (?:he|she|they|anyone) know\b', re.IGNORECASE), "little did they know"),
+    (re.compile(r'\bin the realm of\b', re.IGNORECASE), "in the realm of"),
+]
+
 
 @dataclass
 class ParagraphIssue:
@@ -98,6 +112,7 @@ class ParagraphIssue:
     proper_noun_warnings: List[str] = field(default_factory=list)
     length_warnings: List[str] = field(default_factory=list)
     format_warnings: List[str] = field(default_factory=list)
+    ai_cliche_warnings: List[str] = field(default_factory=list)
 
     @property
     def is_flagged(self) -> bool:
@@ -153,7 +168,7 @@ class PreCheckReport:
             lines.append(f"• [CẢNH BÁO TÊN RIÊNG]: {'; '.join(variant_strs)}")
 
         if not self.flagged_indices:
-            lines.append("\n✅ Tất cả các đoạn văn đều mượt mà, đúng chuẩn 2-3 câu/đoạn cho TTS, không có lỗi lặp từ hay định dạng!")
+            lines.append("\n✅ Tất cả các đoạn văn đều mượt mà, đúng chuẩn 2-3 câu/đoạn cho TTS, không có dấu vết AI, không lặp từ hay lỗi định dạng!")
         else:
             lines.append("\n--- CHI TIẾT CÁC ĐOẠN BỊ GẮN CỜ CẢNH BÁO ---")
             for idx in self.flagged_indices:
@@ -173,7 +188,7 @@ class PythonPreChecker:
     2. Detects repetitive words/sentence starters.
     3. Detects proper nouns (character names) and fuzzy spelling inconsistencies.
     4. Detects overly long sentences (>35 words) or choppy caption fragments.
-    5. Detects formatting anomalies (ALL CAPS, missing punctuation, broken symbols).
+    5. Detects AI writing clichés ("dấu vết AI") & formatting anomalies.
     """
 
     def __init__(
@@ -200,7 +215,7 @@ class PythonPreChecker:
         # 2. Extract character names & check for inconsistent proper noun spelling
         detected_chars, noun_variants, suspect_to_canonical = self._detect_proper_nouns_and_typos(clean_text)
 
-        # 3. Inspect each paragraph for the 4 categories of issues
+        # 3. Inspect each paragraph for the 5 categories of issues
         paragraph_issues: List[ParagraphIssue] = []
         flagged_indices: List[int] = []
         clean_indices: List[int] = []
@@ -223,6 +238,19 @@ class PythonPreChecker:
             flagged_indices=flagged_indices,
             clean_indices=clean_indices,
         )
+
+    def normalize_proper_nouns_in_text(self, text: str, report: PreCheckReport) -> str:
+        """
+        Automatically fix detected proper noun spelling variants in pure Python (0 tokens)
+        before sending the plot skeleton to Gemini or exporting in Python-only mode.
+        """
+        if not report.proper_noun_variants:
+            return text
+        fixed = text
+        for canon, variants in report.proper_noun_variants.items():
+            for var in variants:
+                fixed = re.sub(rf'\b{re.escape(var)}\b', canon, fixed)
+        return fixed
 
     def _detect_proper_nouns_and_typos(
         self, text: str
@@ -278,7 +306,7 @@ class PythonPreChecker:
         suspect_to_canonical: Dict[str, str],
         detected_chars: List[str],
     ) -> ParagraphIssue:
-        """Check a single paragraph for repetition, proper noun typos, length, and formatting."""
+        """Check a single paragraph for repetition, proper noun typos, length, AI clichés, and formatting."""
         issue = ParagraphIssue(index=index, text=para)
         words_raw = re.findall(r"\b[A-Za-z']+\b", para)
         words_lower = [w.lower() for w in words_raw]
@@ -332,7 +360,14 @@ class PythonPreChecker:
         if issue.length_warnings:
             issue.flags.append(", ".join(issue.length_warnings))
 
-        # 4. Check Formatting & Caption Artifacts
+        # 4. Check AI Writing Traces ("Dấu vết AI")
+        for pattern, label in AI_TRACE_PATTERNS:
+            if pattern.search(para):
+                issue.ai_cliche_warnings.append(label)
+        if issue.ai_cliche_warnings:
+            issue.flags.append(f"Dấu vết AI: {', '.join(issue.ai_cliche_warnings)}")
+
+        # 5. Check Formatting & Caption Artifacts
         if not re.search(r'[.!?]["\']?$', para.strip()):
             issue.format_warnings.append("Thiếu dấu kết câu")
 
@@ -348,3 +383,4 @@ class PythonPreChecker:
             issue.flags.append(f"Định dạng: {', '.join(issue.format_warnings)}")
 
         return issue
+

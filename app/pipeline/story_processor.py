@@ -198,8 +198,10 @@ class StoryProcessor:
             if progress_callback:
                 progress_callback(ProcessingState.BUILDING_SRT, filename)
 
-            tts_script = format_tts_paragraphs(self.rewritten_story, sentences_per_paragraph=3)
+            tts_script = format_tts_paragraphs(self.rewritten_story, sentences_per_paragraph=3, clean_cliches=True)
             formatted_output = format_unified_output(self.title, tts_script)
+            post_report = self.pre_checker.analyze_and_prepare(tts_script)
+            precheck_report_text = post_report.to_vietnamese_summary()
 
             new_entries = []
             if self.export_srt:

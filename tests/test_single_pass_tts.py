@@ -83,7 +83,7 @@ class TestSinglePassTTS(unittest.TestCase):
         self.assertEqual(strip_srt_artifacts(raw_with_timecode), "Hello world.")
 
     def test_python_prechecker_flags_issues_zero_tokens(self):
-        """Verify pure-Python Pre-Checker detects repetitive words, proper noun variants, and long sentences."""
+        """Verify pure-Python Pre-Checker detects repetitive words, proper noun variants, AI clichés, and long sentences."""
         checker = PythonPreChecker()
         raw_text = (
             "Marcus entered the grand ballroom quietly. Everyone stared at his old jacket. "
@@ -103,6 +103,12 @@ class TestSinglePassTTS(unittest.TestCase):
         summary_vi = report.to_vietnamese_summary()
         self.assertIn("BÁO CÁO SƠ TUYỂN PYTHON THUẦN (0 TOKEN)", summary_vi)
         self.assertIn("Đoạn #2", summary_vi)
+
+        # Verify AI cliché detection ("Dấu vết AI")
+        ai_text = "Little did he know, a tapestry of emotions and palpable silence filled the room."
+        ai_report = checker.analyze_and_prepare(ai_text)
+        self.assertIn(0, ai_report.flagged_indices)
+        self.assertIn("Dấu vết AI", ai_report.to_vietnamese_summary())
 
     def test_hybrid_workflow_targeted_ai_and_python_only(self):
         """Verify Hybrid mode only sends flagged paragraphs to AI and Python-only mode uses 0 API calls."""
